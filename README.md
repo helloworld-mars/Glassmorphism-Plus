@@ -1,19 +1,19 @@
 <div align="center">
 
-# 🌌 Komari Glassmorphism
+# 🌌 Komari Glassmorphism Plus
 
 ## 给 Komari Monitor 的一套「玻璃拟态 · 运维驾驶舱」主题
 
 从好看的监控首页，逐步成长为好用、可配置、适合长期运行的 Komari 主题。
 
-![Version](https://img.shields.io/github/v/release/sanrokamlan-prog/komari-theme-Glassmorphism?style=for-the-badge&label=release&color=10b981)
+![Version](https://img.shields.io/github/v/release/helloworld-mars/Glassmorphism-Plus?style=for-the-badge&label=release&color=10b981)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883?style=for-the-badge&logo=vue.js)
 ![Vite](https://img.shields.io/badge/Vite-7-646cff?style=for-the-badge&logo=vite)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-v4-38bdf8?style=for-the-badge&logo=tailwindcss)
 ![Bun](https://img.shields.io/badge/Bun-%3E%3D1.2-000000?style=for-the-badge&logo=bun)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)
 
-**[📥 下载 Release](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases)** ·
+**[📥 下载 Release](https://github.com/helloworld-mars/Glassmorphism-Plus/releases)** ·
 **[🚀 安装](#-安装--升级)** ·
 **[✨ 功能](#-节点详情页全面升级)** ·
 **[⚙️ 设置](#️-主题设置)** ·
@@ -27,7 +27,7 @@
 
 <div align="center">
 
-<img src="docs/preview.png" width="80%" alt="Komari Glassmorphism 可配置能力概览" />
+<img src="docs/preview.png" width="80%" alt="Komari Glassmorphism Plus 可配置能力概览" />
 
 </div>
 
@@ -37,14 +37,22 @@
 
 | 项目     | 说明                                                      |
 | :------- | :-------------------------------------------------------- |
-| 当前版本 | **v3.3.3**                                                |
+| 当前版本 | **v1.2**                                                  |
 | 主题定位 | Komari Monitor 可导入 zip 主题，不是普通 Web App 部署包   |
 | 视觉风格 | 毛玻璃卡片、动态背景、浅色 / 深色 / 北京时间自动日夜模式  |
 | 数据能力 | Metric Store 优先，旧接口自动 fallback，兼容 Komari 1.2.x |
 | 高级工具 | 拓扑、性价比、健康摘要、快照导出、访客安全审计            |
-| 发布产物 | `komari-theme-Glassmorphism-build-<short-sha>.zip`        |
+| 发布产物 | `Glassmorphism-Plus.zip`                                  |
 
 > 好看只是外壳。v3 真正的重点，是把 Metric、Ping、流量、费用、健康分析和运维工具整合成日常真的会打开来看的监控面板。
+
+---
+
+## ✨ v1.0 · Glassmorphism Plus
+
+- 当前维护者为 [helloworld-mars](https://github.com/helloworld-mars)，发布仓库为 [Glassmorphism-Plus](https://github.com/helloworld-mars/Glassmorphism-Plus)。
+- 本主题基于 [sanrokamlan 的原始 Glassmorphism 主题](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism) 二次开发；原始来源与署名会持续保留。
+- 本地构建固定生成 `Glassmorphism-Plus.zip`，其顶层结构保持 Komari 所需的 `komari-theme.json`、`preview.png` 与 `dist/`。
 
 ---
 
@@ -418,18 +426,27 @@ API / RPC
 Komari 后台支持直接填写仓库地址并拉取最新 Release：
 
 ```text
-https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism
+https://github.com/helloworld-mars/Glassmorphism-Plus
 ```
 
 ### 方式二：手动安装 Release
 
-1. 打开 [Releases](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases)
-2. 下载最新的 `komari-theme-Glassmorphism-build-*.zip`
+1. 打开 [Releases](https://github.com/helloworld-mars/Glassmorphism-Plus/releases)
+2. 下载最新的 `Glassmorphism-Plus.zip`
 3. 登录 Komari Monitor 后台，进入 **设置 → 主题管理**
 4. 上传 zip 并启用主题
 5. 在主题设置中调整视觉、卡片、快捷控制和高级工具
 
 > 请上传 Release 附件中的主题 zip，不要上传 GitHub 自动生成的源码压缩包。
+
+### 从旧版 Plus 迁移
+
+早期 Plus 安装包错误地使用了原主题的 `short: Glassmorphism`。Komari 以 `short` 作为主题目录、导入覆盖检测和主题设置命名空间的唯一标识；因此本版改为独立的 `glassmorphism-plus`，不会再覆盖原主题，但也不会自动复制旧命名空间中的主题设置。
+
+1. 在升级前记录旧主题设置，尤其是“首页节点卡片延迟任务绑定”的 JSON。
+2. 上传本版 `Glassmorphism-Plus.zip`，启用 **Komari Glassmorphism Plus**。
+3. 在新主题的设置页恢复需要的设置和延迟任务绑定，确认首页正常后再继续使用。
+4. 只有确认旧的 `Glassmorphism` 项目不是原主题且不再需要时，才在 Komari 后台删除它；不要删除真正的原版主题。
 
 ---
 
@@ -457,7 +474,7 @@ bun run test:visual:update
 构建成功后会生成：
 
 - `dist/`
-- `komari-theme-Glassmorphism-build-<short-sha>.zip`
+- `Glassmorphism-Plus.zip`
 
 发布包固定包含：
 
@@ -467,7 +484,7 @@ preview.png
 dist/
 ```
 
-> 发布版本只改 [`komari-theme.json`](komari-theme.json) 顶层 `version`，不要给 `package.json` 添加顶层 `version`。
+> Komari 后台显示的主题版本以 [`komari-theme.json`](komari-theme.json) 顶层 `version` 为准；`package.json` 的 `1.2.1` 仅用于 Node/Bun 工具元数据。
 
 ---
 
@@ -627,7 +644,7 @@ dist/
 
 </details>
 
-更多历史版本请查看 [Releases](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases)。
+更多版本请查看 [Glassmorphism Plus Releases](https://github.com/helloworld-mars/Glassmorphism-Plus/releases)。
 
 ---
 
@@ -654,7 +671,7 @@ dist/
 
 ## 🙏 致谢
 
-感谢原始主题作者 **Tokinx**，感谢 [Komari](https://github.com/komari-monitor/komari)、[Komari Naive](https://github.com/tonyliuzj/komari-naive)、Vue、Vite、reka-ui、Tailwind CSS，以及所有反馈 Issue、提交 PR 和分享建议的朋友。
+感谢原始主题作者 [sanrokamlan](https://github.com/sanrokamlan-prog)，感谢 [Komari](https://github.com/komari-monitor/komari)、[Komari Naive](https://github.com/tonyliuzj/komari-naive)、Vue、Vite、reka-ui、Tailwind CSS，以及所有反馈 Issue、提交 PR 和分享建议的朋友。
 
 ## 📄 License
 

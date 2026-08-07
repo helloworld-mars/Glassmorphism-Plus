@@ -41,7 +41,7 @@ function getThemeVersion(): string {
 
 function getCommitHash(): string {
   try {
-    return execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim()
+    return execSync('git rev-parse --short HEAD', { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
   }
   catch {
     return 'unknown'
@@ -60,8 +60,7 @@ function komariThemeZip(): Plugin {
     name: 'komari-theme-zip',
     apply: 'build',
     closeBundle: async () => {
-      const commitHash = getCommitHash()
-      const zipFileName = `komari-theme-Glassmorphism-build-${commitHash}.zip`
+      const zipFileName = 'Glassmorphism-Plus.zip'
       const distDir = resolve(__dirname, 'dist')
       const previewPath = resolve(__dirname, 'docs/preview.png')
       const outputPath = resolve(__dirname, zipFileName)

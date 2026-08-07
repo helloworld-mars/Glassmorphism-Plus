@@ -5,7 +5,7 @@ import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
 import { useDebounceFn } from '@vueuse/core'
 import { computed, defineAsyncComponent, nextTick, onActivated, onDeactivated, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import DeferredRender from '@/components/DeferredRender.vue'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -55,6 +55,7 @@ const PingMonitorDialog = defineAsyncComponent(() => import('@/components/PingMo
 const NodeTopologyPanel = defineAsyncComponent(() => import('@/components/NodeTopologyPanel.vue'))
 const ProviderValuePanel = defineAsyncComponent(() => import('@/components/ProviderValuePanel.vue'))
 const SnapshotExportPanel = defineAsyncComponent(() => import('@/components/SnapshotExportPanel.vue'))
+const NodePingBindingManager = defineAsyncComponent(() => import('@/components/NodePingBindingManager.vue'))
 
 const nodeItemStaggerMs = UI_CONFIG.motion.staggerMs
 const nodeItemStaggerLimit = UI_CONFIG.motion.staggerLimit
@@ -64,8 +65,22 @@ const denseNodePingAnimationThreshold = UI_CONFIG.motion.denseNodePingAnimationT
 const appStore = useAppStore()
 const nodesStore = useNodesStore()
 const router = useRouter()
+const route = useRoute()
 const { record: recordVisitorEvent } = useVisitorAudit()
 const isViewActive = ref(true)
+const pingSettingsView = 'pingsettings'
+const legacyPingSettingsView = 'node-ping-bindings'
+const isNodePingBindingsView = computed(() => route.query.view === pingSettingsView || route.query.view === legacyPingSettingsView)
+
+watch(() => route.query.view, (view) => {
+  if (view !== legacyPingSettingsView)
+    return
+
+  void router.replace({
+    name: 'home',
+    query: { ...route.query, view: pingSettingsView },
+  })
+}, { immediate: true })
 
 onActivated(() => {
   isViewActive.value = true
@@ -419,181 +434,184 @@ const nodeCardGridClass = computed(() => {
 
 <template>
   <div class="home-view" :class="!appStore.disablePageAnimation && 'home-view--motion'">
-    <div v-if="appStore.alertEnabled && appStore.alertContent" class="alert px-4">
-      <Alert class="border-none bg-background/60 backdrop-blur-xs rounded-md">
-        <AlertTitle v-if="appStore.alertTitle">
-          {{ appStore.alertTitle }}
-        </AlertTitle>
-        <AlertDescription>
-          <MarkdownRenderer :content="appStore.alertContent" />
-        </AlertDescription>
-      </Alert>
-    </div>
-
-    <NodeGeneralCards
-      v-if="!appStore.hideGeneralCard"
-      :nodes="groupNodeList"
-      :globe-nodes="groupNodeList"
-      :transition-key="appStore.nodeSelectedGroup"
-    />
-
-    <div class="node-info p-4 pt-0 flex flex-col gap-4 relative z-1 pointer-events-none" :class="!!appStore.hideGeneralCard && 'pt-4'">
-      <div class="nodes min-w-0">
-        <Tabs v-model="appStore.nodeSelectedGroup" class="w-full flex-col gap-4">
-          <div class="flex flex-col gap-2 xl:flex-row xl:items-center">
-            <div class="home-controls-scroll min-w-0 overflow-x-auto overscroll-x-contain rounded-sm pointer-events-auto touch-pan-x">
-              <div class="flex w-max gap-2">
-                <TabsList class="w-max h-8 bg-background/50 backdrop-blur-xl rounded-md pointer-events-auto">
-                  <TabsTrigger
-                    v-for="g in groups" :key="g.name" :value="g.name"
-                    class="h-6.5 flex-none shrink-0 text-xs border-none data-[state=active]:text-selection shadow-none rounded-sm"
-                  >
-                    {{ g.tab }}
-                  </TabsTrigger>
-                </TabsList>
-
-                <div
-                  v-if="showQuickControls && activeHomeTool === 'nodes'"
-                  class="flex h-8 w-max items-center gap-1 rounded-md bg-background/50 px-1 backdrop-blur-xl pointer-events-auto"
-                >
-                  <button
-                    v-for="control in quickControls" :key="control.key"
-                    type="button"
-                    class="inline-flex h-6.5 flex-none shrink-0 items-center gap-1 rounded-sm px-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                    :class="activeQuickControl === control.key ? 'bg-background text-selection shadow-sm' : ''"
-                    :aria-pressed="activeQuickControl === control.key"
-                    :aria-label="`切换到${control.label}节点，${quickControlCounts[control.key] ?? 0} 台`"
-                    @click="setQuickControl(control.key)"
-                  >
-                    <Icon :icon="control.icon" :width="12" :height="12" />
-                    <span>{{ control.label }}</span>
-                    <span class="rounded-full bg-slate-500/10 px-1 text-[10px] tabular-nums text-foreground/65">
-                      {{ quickControlCounts[control.key] ?? 0 }}
-                    </span>
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div class="search flex min-w-0 flex-wrap gap-2 items-center justify-end pointer-events-auto max-sm:justify-start xl:ml-auto">
-              <div v-if="homeTools.length && appStore.homeAdvancedToolsVisible" class="flex h-8 items-center gap-1 rounded-md bg-background/50 p-0.5 backdrop-blur-xs">
-                <Button
-                  v-for="tool in homeTools" :key="tool.key"
-                  variant="ghost" size="icon"
-                  class="size-7 rounded-sm text-muted-foreground shadow-none hover:bg-background/60"
-                  :class="[activeHomeTool === tool.key ? '!text-selection !bg-background' : '']"
-                  :aria-label="`${tool.label}：${tool.description}`"
-                  :aria-pressed="activeHomeTool === tool.key"
-                  :title="tool.description"
-                  @click="toggleHomeTool(tool.key)"
-                >
-                  <Icon :icon="tool.icon" :width="14" :height="14" />
-                </Button>
-              </div>
-
-              <Button
-                variant="outline" size="icon" aria-label="卡片视图"
-                class="w-8 h-8 border-none bg-background/50 backdrop-blur-xs shadow-none hover:bg-background/60 rounded-md"
-                :class="[appStore.nodeViewMode === 'card' ? '!text-selection !bg-background' : '']"
-                @click="setNodeViewMode('card')"
-              >
-                <Icon icon="tabler:layout-grid" :width="14" :height="14" />
-              </Button>
-              <Button
-                variant="outline" size="icon" aria-label="列表视图"
-                class="w-8 h-8 border-none bg-background/50 backdrop-blur-xs shadow-none hover:bg-background/60 rounded-md"
-                :class="[appStore.nodeViewMode === 'list' ? '!text-selection !bg-background' : '']"
-                @click="setNodeViewMode('list')"
-              >
-                <Icon icon="tabler:table" :width="14" :height="14" />
-              </Button>
-              <div class="relative z-1 h-8" :class="searchText ? 'w-full sm:w-60' : 'w-8'">
-                <div class="absolute top-0 right-0 w-full">
-                  <Input
-                    v-model="searchText" placeholder="搜索名称、地区、IP、CPU"
-                    aria-label="搜索节点"
-                    class="transition-all border-none shadow-none h-8 bg-background/50 backdrop-blur-xs rounded-md hover:!bg-background/60 focus:!pl-7.5 focus:placeholder:!text-muted-foreground focus:!bg-background/80 focus:!ring-slate-500/10"
-                    :class="searchText ? '!w-full sm:!w-60 !pl-7.5 pr-7 placeholder:!text-muted-foreground' : 'w-8 placeholder:text-transparent focus:!w-52 sm:focus:!w-60'"
-                    @keydown.esc.prevent="clearSearch"
-                  />
-                  <Icon
-                    icon="tabler:search" :width="14" :height="14"
-                    class="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                  />
-                  <button
-                    v-if="searchText"
-                    type="button"
-                    class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    aria-label="清空搜索"
-                    @click="clearSearch"
-                  >
-                    <Icon icon="tabler:x" :width="14" :height="14" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-          <TabsContent v-for="g in groups" :key="g.name" :value="g.name" class="pointer-events-auto">
-            <div v-if="activeHomeTool !== 'nodes'" class="mb-4 rounded-lg bg-background/50 px-3 py-2 text-sm text-muted-foreground">
-              {{ activeToolTitle }} · 当前分组：{{ g.tab }}（{{ groupNodeList.length }} 台）
-            </div>
-            <NodeTopologyPanel v-if="activeHomeTool === 'topology'" :nodes="groupNodeList" />
-            <NodeComparePanel v-else-if="activeHomeTool === 'nodeCompare'" :nodes="groupNodeList" />
-            <ProviderValuePanel v-else-if="activeHomeTool === 'providerValue'" :nodes="groupNodeList" />
-            <HealthSummaryPanel v-else-if="activeHomeTool === 'healthSummary'" :nodes="groupNodeList" />
-            <SnapshotExportPanel v-else-if="activeHomeTool === 'snapshotExport'" :nodes="groupNodeList" />
-            <AuditLogPanel v-else-if="activeHomeTool === 'auditLog'" />
-            <TransitionGroup
-              v-else-if="nodeList.length !== 0 && appStore.nodeViewMode === 'card'"
-              :appear="enableNodeCardTransition"
-              :css="enableNodeCardTransition"
-              name="node-card-switch"
-              tag="div"
-              :class="nodeCardGridClass"
-            >
-              <div
-                v-for="(node, index) in nodeList"
-                :key="`${getNodeItemTransitionKey(node)}:${deferNodeCards ? 'deferred' : 'full'}`"
-                class="min-w-0"
-                :style="getNodeItemTransitionStyle(index)"
-              >
-                <DeferredRender
-                  :enabled="deferNodeCards"
-                  :idle-delay="800 + index * 70"
-                  :min-height="deferredNodeCardHeight"
-                >
-                  <NodeCard
-                    :node="node"
-                    :reduce-motion="reduceDenseNodeEffects"
-                    :ping-enabled="isViewActive"
-                    @click="handleNodeClick(node)"
-                    @ping-click="openPingDialog(node)"
-                  />
-                </DeferredRender>
-              </div>
-            </TransitionGroup>
-            <NodeList
-              v-else-if="nodeList.length !== 0 && appStore.nodeViewMode === 'list'"
-              :nodes="nodeList"
-              :transition-key="appStore.nodeSelectedGroup"
-              :sort-reset-key="nodeListSortResetKey"
-              :ping-enabled="isViewActive"
-              @click="handleNodeClick"
-              @ping-click="openPingDialog"
-            />
-            <div v-else class="text-muted-foreground text-center py-8">
-              <Empty :description="emptyDescription" />
-            </div>
-          </TabsContent>
-        </Tabs>
+    <NodePingBindingManager v-if="isNodePingBindingsView" />
+    <template v-else>
+      <div v-if="appStore.alertEnabled && appStore.alertContent" class="alert px-4">
+        <Alert class="border-none bg-background/60 backdrop-blur-xs rounded-md">
+          <AlertTitle v-if="appStore.alertTitle">
+            {{ appStore.alertTitle }}
+          </AlertTitle>
+          <AlertDescription>
+            <MarkdownRenderer :content="appStore.alertContent" />
+          </AlertDescription>
+        </Alert>
       </div>
-    </div>
-    <PingMonitorDialog
-      v-if="pingDialogNode"
-      :open="Boolean(pingDialogNode)"
-      :uuid="pingDialogNode.uuid"
-      :node-name="pingDialogNode.name"
-      @update:open="!$event && (pingDialogNode = null)"
-    />
+
+      <NodeGeneralCards
+        v-if="!appStore.hideGeneralCard"
+        :nodes="groupNodeList"
+        :globe-nodes="groupNodeList"
+        :transition-key="appStore.nodeSelectedGroup"
+      />
+
+      <div class="node-info p-4 pt-0 flex flex-col gap-4 relative z-1 pointer-events-none" :class="!!appStore.hideGeneralCard && 'pt-4'">
+        <div class="nodes min-w-0">
+          <Tabs v-model="appStore.nodeSelectedGroup" class="w-full flex-col gap-4">
+            <div class="flex flex-col gap-2 xl:flex-row xl:items-center">
+              <div class="home-controls-scroll min-w-0 overflow-x-auto overscroll-x-contain rounded-sm pointer-events-auto touch-pan-x">
+                <div class="flex w-max gap-2">
+                  <TabsList class="w-max h-8 bg-background/50 backdrop-blur-xl rounded-md pointer-events-auto">
+                    <TabsTrigger
+                      v-for="g in groups" :key="g.name" :value="g.name"
+                      class="h-6.5 flex-none shrink-0 text-xs border-none data-[state=active]:text-selection shadow-none rounded-sm"
+                    >
+                      {{ g.tab }}
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <div
+                    v-if="showQuickControls && activeHomeTool === 'nodes'"
+                    class="flex h-8 w-max items-center gap-1 rounded-md bg-background/50 px-1 backdrop-blur-xl pointer-events-auto"
+                  >
+                    <button
+                      v-for="control in quickControls" :key="control.key"
+                      type="button"
+                      class="inline-flex h-6.5 flex-none shrink-0 items-center gap-1 rounded-sm px-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                      :class="activeQuickControl === control.key ? 'bg-background text-selection shadow-sm' : ''"
+                      :aria-pressed="activeQuickControl === control.key"
+                      :aria-label="`切换到${control.label}节点，${quickControlCounts[control.key] ?? 0} 台`"
+                      @click="setQuickControl(control.key)"
+                    >
+                      <Icon :icon="control.icon" :width="12" :height="12" />
+                      <span>{{ control.label }}</span>
+                      <span class="rounded-full bg-slate-500/10 px-1 text-[10px] tabular-nums text-foreground/65">
+                        {{ quickControlCounts[control.key] ?? 0 }}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="search flex min-w-0 flex-wrap gap-2 items-center justify-end pointer-events-auto max-sm:justify-start xl:ml-auto">
+                <div v-if="homeTools.length && appStore.homeAdvancedToolsVisible" class="flex h-8 items-center gap-1 rounded-md bg-background/50 p-0.5 backdrop-blur-xs">
+                  <Button
+                    v-for="tool in homeTools" :key="tool.key"
+                    variant="ghost" size="icon"
+                    class="size-7 rounded-sm text-muted-foreground shadow-none hover:bg-background/60"
+                    :class="[activeHomeTool === tool.key ? '!text-selection !bg-background' : '']"
+                    :aria-label="`${tool.label}：${tool.description}`"
+                    :aria-pressed="activeHomeTool === tool.key"
+                    :title="tool.description"
+                    @click="toggleHomeTool(tool.key)"
+                  >
+                    <Icon :icon="tool.icon" :width="14" :height="14" />
+                  </Button>
+                </div>
+
+                <Button
+                  variant="outline" size="icon" aria-label="卡片视图"
+                  class="w-8 h-8 border-none bg-background/50 backdrop-blur-xs shadow-none hover:bg-background/60 rounded-md"
+                  :class="[appStore.nodeViewMode === 'card' ? '!text-selection !bg-background' : '']"
+                  @click="setNodeViewMode('card')"
+                >
+                  <Icon icon="tabler:layout-grid" :width="14" :height="14" />
+                </Button>
+                <Button
+                  variant="outline" size="icon" aria-label="列表视图"
+                  class="w-8 h-8 border-none bg-background/50 backdrop-blur-xs shadow-none hover:bg-background/60 rounded-md"
+                  :class="[appStore.nodeViewMode === 'list' ? '!text-selection !bg-background' : '']"
+                  @click="setNodeViewMode('list')"
+                >
+                  <Icon icon="tabler:table" :width="14" :height="14" />
+                </Button>
+                <div class="relative z-1 h-8" :class="searchText ? 'w-full sm:w-60' : 'w-8'">
+                  <div class="absolute top-0 right-0 w-full">
+                    <Input
+                      v-model="searchText" placeholder="搜索名称、地区、IP、CPU"
+                      aria-label="搜索节点"
+                      class="transition-all border-none shadow-none h-8 bg-background/50 backdrop-blur-xs rounded-md hover:!bg-background/60 focus:!pl-7.5 focus:placeholder:!text-muted-foreground focus:!bg-background/80 focus:!ring-slate-500/10"
+                      :class="searchText ? '!w-full sm:!w-60 !pl-7.5 pr-7 placeholder:!text-muted-foreground' : 'w-8 placeholder:text-transparent focus:!w-52 sm:focus:!w-60'"
+                      @keydown.esc.prevent="clearSearch"
+                    />
+                    <Icon
+                      icon="tabler:search" :width="14" :height="14"
+                      class="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                    />
+                    <button
+                      v-if="searchText"
+                      type="button"
+                      class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      aria-label="清空搜索"
+                      @click="clearSearch"
+                    >
+                      <Icon icon="tabler:x" :width="14" :height="14" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <TabsContent v-for="g in groups" :key="g.name" :value="g.name" class="pointer-events-auto">
+              <div v-if="activeHomeTool !== 'nodes'" class="mb-4 rounded-lg bg-background/50 px-3 py-2 text-sm text-muted-foreground">
+                {{ activeToolTitle }} · 当前分组：{{ g.tab }}（{{ groupNodeList.length }} 台）
+              </div>
+              <NodeTopologyPanel v-if="activeHomeTool === 'topology'" :nodes="groupNodeList" />
+              <NodeComparePanel v-else-if="activeHomeTool === 'nodeCompare'" :nodes="groupNodeList" />
+              <ProviderValuePanel v-else-if="activeHomeTool === 'providerValue'" :nodes="groupNodeList" />
+              <HealthSummaryPanel v-else-if="activeHomeTool === 'healthSummary'" :nodes="groupNodeList" />
+              <SnapshotExportPanel v-else-if="activeHomeTool === 'snapshotExport'" :nodes="groupNodeList" />
+              <AuditLogPanel v-else-if="activeHomeTool === 'auditLog'" />
+              <TransitionGroup
+                v-else-if="nodeList.length !== 0 && appStore.nodeViewMode === 'card'"
+                :appear="enableNodeCardTransition"
+                :css="enableNodeCardTransition"
+                name="node-card-switch"
+                tag="div"
+                :class="nodeCardGridClass"
+              >
+                <div
+                  v-for="(node, index) in nodeList"
+                  :key="`${getNodeItemTransitionKey(node)}:${deferNodeCards ? 'deferred' : 'full'}`"
+                  class="min-w-0"
+                  :style="getNodeItemTransitionStyle(index)"
+                >
+                  <DeferredRender
+                    :enabled="deferNodeCards"
+                    :idle-delay="800 + index * 70"
+                    :min-height="deferredNodeCardHeight"
+                  >
+                    <NodeCard
+                      :node="node"
+                      :reduce-motion="reduceDenseNodeEffects"
+                      :ping-enabled="isViewActive"
+                      @click="handleNodeClick(node)"
+                      @ping-click="openPingDialog(node)"
+                    />
+                  </DeferredRender>
+                </div>
+              </TransitionGroup>
+              <NodeList
+                v-else-if="nodeList.length !== 0 && appStore.nodeViewMode === 'list'"
+                :nodes="nodeList"
+                :transition-key="appStore.nodeSelectedGroup"
+                :sort-reset-key="nodeListSortResetKey"
+                :ping-enabled="isViewActive"
+                @click="handleNodeClick"
+                @ping-click="openPingDialog"
+              />
+              <div v-else class="text-muted-foreground text-center py-8">
+                <Empty :description="emptyDescription" />
+              </div>
+            </TabsContent>
+          </Tabs>
+        </div>
+      </div>
+      <PingMonitorDialog
+        v-if="pingDialogNode"
+        :open="Boolean(pingDialogNode)"
+        :uuid="pingDialogNode.uuid"
+        :node-name="pingDialogNode.name"
+        @update:open="!$event && (pingDialogNode = null)"
+      />
+    </template>
   </div>
 </template>
 

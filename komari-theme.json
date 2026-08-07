@@ -1,10 +1,10 @@
 {
-  "name": "Komari Glassmorphism",
-  "short": "Glassmorphism",
-  "description": "A Glassmorphism theme for Komari",
-  "version": "3.3.3",
-  "author": "sanrokamlan",
-  "url": "https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism",
+  "name": "Komari Glassmorphism Plus",
+  "short": "glassmorphism-plus",
+  "description": "A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.",
+  "version": "1.2.1",
+  "author": "helloworld-mars",
+  "url": "https://github.com/helloworld-mars/Glassmorphism-Plus",
   "preview": "preview.png",
   "configuration": {
     "type": "managed",
@@ -72,7 +72,11 @@
       { "key": "lightBackgroundUrl", "name": "亮色模式背景地址", "type": "string", "default": "", "help": "支持 http(s) URL、站内 / 路径；持久本地文件放在 data/theme/user-assets/ 后填写 local:文件名。" },
       { "key": "darkBackgroundUrl", "name": "暗色模式背景地址", "type": "string", "default": "", "help": "支持 http(s) URL、站内 / 路径；持久本地文件放在 data/theme/user-assets/ 后填写 local:文件名。" },
       { "key": "backgroundBlur", "name": "背景模糊半径", "type": "number", "default": 0, "help": "背景的高斯模糊半径（单位：px），0 表示不模糊" },
-      { "key": "backgroundOverlay", "name": "背景遮罩强度", "type": "number", "default": 0, "help": "范围 -100 到 100；0 关闭，正数加深，负数降低透明度。" }
+      { "key": "backgroundOverlay", "name": "背景遮罩强度", "type": "number", "default": 0, "help": "范围 -100 到 100；0 关闭，正数加深，负数降低透明度。" },
+
+      { "name": "09 · 延迟任务绑定", "type": "title" },
+      { "key": "hidePingTaskBindingEntry", "name": "隐藏延迟任务绑定入口", "type": "switch", "default": false, "help": "开启后，首页顶部不显示“延迟任务绑定”入口；关闭时，所有访问者均可见。此开关只控制入口显示，不影响管理员通过页面地址直接管理绑定。" },
+      { "key": "nodeCardPingTaskBindings", "name": "首页节点卡片延迟任务绑定", "type": "richtext", "default": "{}", "help": "由主题内“延迟任务绑定”管理页面自动维护，请勿手动编辑。" }
     ]
   }
 }

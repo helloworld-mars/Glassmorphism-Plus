@@ -49,6 +49,15 @@ const actionButtons = computed(() => {
     action: 'toggleTheme',
   })
 
+  if (router.currentRoute.value.name === 'home' && !appStore.hidePingTaskBindingEntry) {
+    buttons.push({
+      title: '延迟任务绑定',
+      icon: 'tabler:activity-heartbeat',
+      action: 'openNodePingBindings',
+      pressed: router.currentRoute.value.query.view === 'pingsettings',
+    })
+  }
+
   if (!appStore.loading && (appStore.privateFeaturesAllowed || !appStore.hideAdminEntryWhenLoggedOut)) {
     buttons.push({
       title: '后台管理',
@@ -81,10 +90,16 @@ function handleButtonClick(action: string) {
       })
       location.href = '/admin'
       break
+    case 'openNodePingBindings':
+      void router.push({
+        name: 'home',
+        query: { ...router.currentRoute.value.query, view: 'pingsettings' },
+      })
+      break
   }
 }
 
-const sitename = computed(() => appStore.publicSettings?.sitename || 'Komari Monitor')
+const sitename = computed(() => appStore.siteName)
 </script>
 
 <template>
@@ -113,6 +128,7 @@ const sitename = computed(() => appStore.publicSettings?.sitename || 'Komari Mon
                 variant="ghost"
                 size="icon-sm"
                 :aria-label="button.title"
+                :title="button.title"
                 :aria-pressed="button.pressed"
                 :class="button.pressed && 'bg-background/70 text-selection'"
                 @click="handleButtonClick(button.action)"

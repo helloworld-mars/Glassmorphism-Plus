@@ -1,4 +1,5 @@
 import type { MetricPoint, MetricSeries, PingMetricTaskStats, PingTaskInfo } from '@/utils/rpc'
+import { parsePingTimestampMs } from '@/utils/pingTime'
 
 export const PING_LATENCY_METRIC = 'ping.latency_ms'
 export const PING_LOSS_METRIC = 'ping.loss'
@@ -88,7 +89,7 @@ export function normalizeMetricSeries(series: MetricSeries): NormalizedMetricSer
     ...series,
     tags: group.tags,
     tag: undefined,
-    points: group.points.sort((left, right) => new Date(left.time).getTime() - new Date(right.time).getTime()),
+    points: group.points.sort((left, right) => (parsePingTimestampMs(left.time) ?? 0) - (parsePingTimestampMs(right.time) ?? 0)),
   }))
 }
 

@@ -8,6 +8,9 @@ const api = getSharedApi()
 
 const buildVersion = __BUILD_VERSION__
 const buildGitHash = __BUILD_GIT_HASH__
+const themeMaintainer = 'helloworld-mars'
+const themeRepository = 'https://github.com/helloworld-mars/Glassmorphism-Plus'
+const originalThemeRepository = 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism'
 
 const serverVersion = ref<VersionInfo | null>(null)
 
@@ -21,6 +24,10 @@ onMounted(async () => {
 })
 
 const formattedServerVersion = computed(() => serverVersion.value?.version ?? '')
+const themeBuildDetails = computed(() => {
+  const identity = `v${buildVersion} · ${themeMaintainer}`
+  return buildGitHash === 'unknown' ? identity : `${identity}\n${buildGitHash}`
+})
 </script>
 
 <template>
@@ -41,20 +48,28 @@ const formattedServerVersion = computed(() => serverVersion.value?.version ?? ''
           </a>
         </DataTooltip>
       </div>
-      <div class="flex flex-wrap gap-1 items-center justify-end text-right">
-        Theme by
-        <DataTooltip
-          as="span"
-          placement="top"
-          :content="`v${buildVersion}\n${buildGitHash}`"
-        >
+      <div class="flex flex-col items-end text-right leading-4">
+        <div class="flex gap-1 items-center">
+          Theme by
           <a
-            href="https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism" target="_blank" rel="noopener noreferrer"
+            :href="themeRepository" target="_blank" rel="noopener noreferrer"
+            class="font-medium text-foreground transition-opacity hover:opacity-80"
+          >
+            Glassmorphism Plus
+          </a>
+        </div>
+        <div class="flex flex-wrap gap-1 items-center justify-end text-[11px] text-muted-foreground">
+          <DataTooltip as="span" placement="top" :content="themeBuildDetails">
+            <span>v{{ buildVersion }} · {{ themeMaintainer }}</span>
+          </DataTooltip>
+          <span aria-hidden="true">·</span>
+          <a
+            :href="originalThemeRepository" target="_blank" rel="noopener noreferrer"
             class="transition-opacity hover:opacity-80"
           >
-            <span class="font-medium text-foreground">Komari Glassmorphism</span>
+            Based on the original theme by sanrokamlan
           </a>
-        </DataTooltip>
+        </div>
       </div>
     </div>
   </footer>

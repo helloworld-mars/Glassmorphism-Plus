@@ -5,6 +5,7 @@ import { useStorageAsync } from '@vueuse/core'
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { getAuthSession, requirePermission, setAuthSessionFromLogin, verifyLogin } from '@/services/auth.service'
+import { parseNodeCardPingTaskBindings } from '@/utils/nodeCardPingBindings'
 
 export type ThemeMode = 'auto' | 'light' | 'dark'
 export type ManagedThemeMode = 'beijing' | 'light' | 'dark'
@@ -912,6 +913,10 @@ const useAppStore = defineStore('app', () => {
   }
 
   const themeSettings = computed(() => normalizeThemeSettings(publicSettings.value?.theme_settings))
+  const siteName = computed<string>(() => {
+    const value = publicSettings.value?.sitename
+    return typeof value === 'string' && value.trim() ? value.trim() : 'Komari'
+  })
   const visitorAuditSupported = computed(() => typeof publicSettings.value?.visitor_audit_enabled === 'boolean')
   const visitorAuditEnabled = computed(() => publicSettings.value?.visitor_audit_enabled === true)
 
@@ -959,6 +964,8 @@ const useAppStore = defineStore('app', () => {
       return settings.nodeCardSize
     return 'compact'
   })
+
+  const nodeCardPingTaskBindings = computed(() => parseNodeCardPingTaskBindings(themeSettings.value.nodeCardPingTaskBindings))
 
   // 当前实际使用的视图模式
   const nodeViewMode = computed<NodeViewMode>({
@@ -1170,6 +1177,8 @@ const useAppStore = defineStore('app', () => {
 
   const hideAdminEntryWhenLoggedOut = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'hideAdminEntryWhenLoggedOut', false))
 
+  const hidePingTaskBindingEntry = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'hidePingTaskBindingEntry', false))
+
   const hidePriceWhenLoggedOut = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'hidePriceWhenLoggedOut', false))
 
   const providerAliases = computed<string>(() => readStringSetting(themeSettings.value, 'providerAliases'))
@@ -1307,6 +1316,7 @@ const useAppStore = defineStore('app', () => {
     nodeViewMode,
     defaultViewMode,
     nodeCardSize,
+    nodeCardPingTaskBindings,
     rpcTransportMode,
     byteDecimals,
     alertEnabled,
@@ -1344,6 +1354,7 @@ const useAppStore = defineStore('app', () => {
     diskPredictionThresholdDays,
     chartDashboardTemplate,
     hideAdminEntryWhenLoggedOut,
+    hidePingTaskBindingEntry,
     hidePriceWhenLoggedOut,
     providerAliases,
     exportSecondaryPassword,
@@ -1359,6 +1370,7 @@ const useAppStore = defineStore('app', () => {
     authStatus,
     privateFeaturesAllowed,
     publicSettings,
+    siteName,
     connectionError,
     homeScrollPosition,
     updateThemeMode,

@@ -9,6 +9,7 @@ import { ProgressThin } from '@/components/ui/progress-thin'
 import { useNodePingDisplay } from '@/composables/useNodePingDisplay'
 import { useAppStore } from '@/stores/app'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, getStatus, getUptimeDays } from '@/utils/helper'
+import { getNodeCardPingTaskId } from '@/utils/nodeCardPingBindings'
 import { getDiskPercentage, getMemoryPercentage, getTrafficUsed, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
@@ -88,7 +89,10 @@ const {
   lossDisplay,
   latencyPanelTooltip,
   lossPanelTooltip,
-} = useNodePingDisplay(() => props.node.uuid, { enabled: () => props.pingEnabled })
+} = useNodePingDisplay(() => props.node.uuid, {
+  enabled: () => props.pingEnabled,
+  selectedTaskId: () => getNodeCardPingTaskId(appStore.nodeCardPingTaskBindings, props.node.uuid),
+})
 
 const trafficUsedPercentage = computed(() => getTrafficUsedPercentage(props.node))
 const trafficUsed = computed(() => getTrafficUsed(props.node))

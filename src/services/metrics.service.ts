@@ -4,6 +4,12 @@ import { SharedCache } from '@/services/cache.service'
 import { requestManager } from '@/services/request.service'
 import { getSharedRpc, RpcError } from '@/utils/rpc'
 
+export interface PublicPingTaskCatalog {
+  tasks: readonly PingTaskInfo[]
+  taskById: ReadonlyMap<string, PingTaskInfo>
+  taskIdsByNodeUuid: ReadonlyMap<string, ReadonlySet<string>>
+}
+
 function normalizeHours(hours: number | null | undefined): number | undefined {
   if (typeof hours !== 'number' || !Number.isFinite(hours) || hours <= 0)
     return undefined
@@ -53,6 +59,12 @@ const metricDefinitionsCache = new SharedCache<MetricDefinition[]>({
   cleanupInterval: CACHE_CONFIG.cleanup.interval,
 })
 
+const publicPingTaskCatalogCache = new SharedCache<PublicPingTaskCatalog>({
+  maxSize: CACHE_CONFIG.nodePingSummary.taskCatalog.maxSize,
+  ttl: CACHE_CONFIG.nodePingSummary.taskCatalog.ttl,
+  cleanupInterval: CACHE_CONFIG.cleanup.interval,
+})
+
 export function getMetricDefinitionsRequestKey(): string {
   return 'metrics:definitions'
 }
@@ -90,6 +102,44 @@ export function getPingMetricStatsRequestKey(params: PingMetricStatsParams): str
 
 export function getPublicPingTasksRequestKey(): string {
   return 'metrics:public-ping-tasks'
+}
+
+function normalizePublicPingTaskId(value: unknown): string | null {
+  const id = typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    ? value
+    : Number.NaN
+  return Number.isFinite(id) ? String(id) : null
+}
+
+function buildPublicPingTaskCatalog(tasks: PingTaskInfo[]): PublicPingTaskCatalog {
+  const taskById = new Map<string, PingTaskInfo>()
+  const taskIdsByNodeUuid = new Map<string, Set<string>>()
+
+  for (const task of tasks) {
+    if (!task || typeof task !== 'object')
+      continue
+    const taskId = normalizePublicPingTaskId(task?.id)
+    if (!taskId)
+      continue
+
+    taskById.set(taskId, task)
+    for (const clientUuid of task.clients ?? []) {
+      if (typeof clientUuid !== 'string')
+        continue
+      const normalizedUuid = clientUuid.trim().toLowerCase()
+      if (!normalizedUuid)
+        continue
+      const taskIds = taskIdsByNodeUuid.get(normalizedUuid) ?? new Set<string>()
+      taskIds.add(taskId)
+      taskIdsByNodeUuid.set(normalizedUuid, taskIds)
+    }
+  }
+
+  return {
+    tasks,
+    taskById,
+    taskIdsByNodeUuid,
+  }
 }
 
 export function abortQueryMetrics(params: MetricQueryParams): void {
@@ -143,9 +193,33 @@ export async function loadPingMetricStats(params: PingMetricStatsParams): Promis
 }
 
 export async function loadPublicPingTasks(): Promise<PingTaskInfo[]> {
-  return requestManager.run(
-    getPublicPingTasksRequestKey(),
-    async () => getSharedRpc().getPublicPingTasks(),
+  return [...(await loadPublicPingTaskCatalog()).tasks]
+}
+
+export async function loadPublicPingTaskCatalog(): Promise<PublicPingTaskCatalog> {
+  const key = getPublicPingTasksRequestKey()
+  const cached = publicPingTaskCatalogCache.get(key)
+  if (cached)
+    return cached
+
+  const catalog = await requestManager.run(
+    key,
+    async () => buildPublicPingTaskCatalog(await getSharedRpc().getPublicPingTasks()),
     { shouldRetry: shouldRetryMetricRequest },
   )
+  return publicPingTaskCatalogCache.set(key, catalog)
+}
+
+export function getAssignedPublicPingTask(
+  catalog: PublicPingTaskCatalog,
+  taskId: string,
+  nodeUuid: string,
+): PingTaskInfo | null {
+  const task = catalog.taskById.get(taskId)
+  if (!task)
+    return null
+
+  return catalog.taskIdsByNodeUuid.get(nodeUuid.trim().toLowerCase())?.has(taskId)
+    ? task
+    : null
 }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { PingTimeWindow } from '@/utils/pingTime'
 import type { MetricSeries, PingMetricTaskStats, PingRecord, PingTaskInfo } from '@/utils/rpc'
 import { Icon } from '@iconify/vue'
 import dayjs from 'dayjs'
@@ -10,12 +11,14 @@ import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { CACHE_CONFIG } from '@/constants/cache'
 import { PING_RECORD_MAX_COUNT } from '@/constants/load'
 import { loadPingRecordsWithTasks } from '@/services/history.service'
 import { loadPingMetricStats, queryMetrics } from '@/services/metrics.service'
 import { useAppStore } from '@/stores/app'
 import { ACCESSIBLE_LINE_TYPES, getChartSeriesPalette } from '@/utils/chartPalette'
 import { isPingMetric, normalizeMetricSeriesList, PING_LATENCY_METRIC, pingTaskId, pingTaskName } from '@/utils/metricSeries'
+import { createNextAlignedPingTimeWindow, createPingTimeWindow, isPingTimestampInWindow, parsePingTimestampMs } from '@/utils/pingTime'
 import { cutPeakValues, interpolateNullsLinear } from '@/utils/recordHelper'
 import '@/utils/echarts' // 共享 ECharts 配置
 
@@ -62,6 +65,7 @@ const presetViews = [
 ]
 const CUSTOM_VIEW_LABEL = '自定义'
 const DEFAULT_CUSTOM_RANGE_HOURS = 24
+const HISTORY_BUCKET_COUNT = CACHE_CONFIG.nodePingSummary.historyBucketCount
 
 // 可用视图列表
 const availableViews = computed(() => {
@@ -149,6 +153,7 @@ watch(availableViews, (views) => {
 // ==================== 数据状态 ====================
 const remoteData = shallowRef<PingRecord[]>([])
 const tasks = shallowRef<PingTaskInfo[]>([])
+const activeTimeWindow = shallowRef<PingTimeWindow | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 const legacyCustomRangeFallback = ref(false)
@@ -232,17 +237,21 @@ function normalizeMetricTask(stat: PingMetricTaskStats): PingTaskInfo {
   }
 }
 
-function buildMetricRecords(seriesList: MetricSeries[]): PingRecord[] {
+function buildMetricRecords(seriesList: MetricSeries[], nodeUuid: string, window: PingTimeWindow): PingRecord[] {
   const records: PingRecord[] = []
   const normalizedSeriesList = normalizeMetricSeriesList(seriesList).filter(isPingMetric)
 
   for (const series of normalizedSeriesList) {
+    if (series.entity_id !== nodeUuid)
+      continue
+
     const taskId = normalizeMetricTaskId(pingTaskId(series))
     if (!Number.isFinite(taskId))
       continue
 
     for (const point of series.points) {
-      if (point.value === null)
+      const timestamp = parsePingTimestampMs(point.time)
+      if (point.value === null || timestamp === null || !isPingTimestampInWindow(timestamp, window))
         continue
 
       records.push({
@@ -254,14 +263,33 @@ function buildMetricRecords(seriesList: MetricSeries[]): PingRecord[] {
     }
   }
 
-  return records.sort((a, b) => dayjs(a.time).valueOf() - dayjs(b.time).valueOf())
+  return records.sort((a, b) => (parsePingTimestampMs(a.time) ?? 0) - (parsePingTimestampMs(b.time) ?? 0))
 }
 
-async function loadMetricPingPayload(nodeUuid: string): Promise<{ records: PingRecord[], tasks: PingTaskInfo[] } | null> {
+function getPingChartTimeWindow(): PingTimeWindow | null {
   const range = appliedCustomRange.value
-  const metricRangeParams = isCustomRange.value && range
-    ? { start: range.start.toDate().toISOString(), end: range.end.toDate().toISOString() }
-    : { hours: selectedHours.value }
+  if (isCustomRange.value && range) {
+    return createPingTimeWindow(range.start.valueOf(), range.end.valueOf(), HISTORY_BUCKET_COUNT)
+  }
+
+  return createNextAlignedPingTimeWindow(Date.now(), selectedHours.value, HISTORY_BUCKET_COUNT)
+}
+
+function filterRecordsToWindow(records: PingRecord[], window: PingTimeWindow): PingRecord[] {
+  return records.filter((record) => {
+    const timestamp = parsePingTimestampMs(record.time)
+    return timestamp !== null && isPingTimestampInWindow(timestamp, window)
+  })
+}
+
+async function loadMetricPingPayload(
+  nodeUuid: string,
+  window: PingTimeWindow,
+): Promise<{ records: PingRecord[], tasks: PingTaskInfo[] } | null> {
+  const metricRangeParams = {
+    start: new Date(window.start).toISOString(),
+    end: new Date(window.end).toISOString(),
+  }
 
   const [statsResult, metricsResult] = await Promise.allSettled([
     loadPingMetricStats({ entity_id: nodeUuid, ...metricRangeParams, max_points: PING_RECORD_MAX_COUNT }),
@@ -280,7 +308,7 @@ async function loadMetricPingPayload(nodeUuid: string): Promise<{ records: PingR
     ? (statsResult.value.stats ?? []).filter(stat => stat.entity_id === nodeUuid)
     : []
   const metricRecords = metricsResult.status === 'fulfilled'
-    ? buildMetricRecords(metricsResult.value.series)
+    ? buildMetricRecords(metricsResult.value.series, nodeUuid, window)
     : []
 
   const metricTaskIds = new Set(metricRecords.map(record => record.task_id))
@@ -301,6 +329,9 @@ async function loadMetricPingPayload(nodeUuid: string): Promise<{ records: PingR
   for (const series of normalizeMetricSeriesList(
     metricsResult.status === 'fulfilled' ? metricsResult.value.series : [],
   ).filter(isPingMetric)) {
+    if (series.entity_id !== nodeUuid)
+      continue
+
     const taskId = normalizeMetricTaskId(pingTaskId(series))
     if (!taskId || taskMap.has(taskId))
       continue
@@ -337,12 +368,22 @@ async function fetchRecords() {
   }
 
   appliedCustomRange.value = isCustomRange.value ? customRange.value : null
+  const requestedWindow = getPingChartTimeWindow()
+  if (!requestedWindow) {
+    remoteData.value = []
+    tasks.value = []
+    error.value = '无法创建有效的时间范围'
+    legacyCustomRangeFallback.value = false
+    loading.value = false
+    return
+  }
+  activeTimeWindow.value = requestedWindow
 
   loading.value = true
   error.value = null
 
   try {
-    const metricPayload = await loadMetricPingPayload(requestedUuid).catch(() => null)
+    const metricPayload = await loadMetricPingPayload(requestedUuid, requestedWindow).catch(() => null)
     if (sequence !== fetchRecordsSequence || requestedUuid !== props.uuid)
       return
 
@@ -358,8 +399,8 @@ async function fetchRecords() {
     if (sequence !== fetchRecordsSequence || requestedUuid !== props.uuid)
       return
 
-    const records = result.records
-    records.sort((a, b) => dayjs(a.time).valueOf() - dayjs(b.time).valueOf())
+    const records = filterRecordsToWindow(result.records, requestedWindow)
+    records.sort((a, b) => (parsePingTimestampMs(a.time) ?? 0) - (parsePingTimestampMs(b.time) ?? 0))
 
     remoteData.value = records
     tasks.value = result.tasks
@@ -387,7 +428,8 @@ async function fetchRecords() {
 
 const mergedData = computed(() => {
   const data = remoteData.value
-  if (!data.length)
+  const window = activeTimeWindow.value
+  if (!data.length || !window)
     return []
 
   const taskList = tasks.value
@@ -406,7 +448,10 @@ const mergedData = computed(() => {
   const anchors: number[] = []
 
   for (const rec of data) {
-    const ts = dayjs(rec.time).valueOf()
+    const ts = parsePingTimestampMs(rec.time)
+    if (ts === null || !isPingTimestampInWindow(ts, window))
+      continue
+
     let anchor: number | null = null
 
     for (let index = anchors.length - 1; index >= 0; index--) {
@@ -432,37 +477,9 @@ const mergedData = computed(() => {
   }
 
   const merged = Array.from(grouped.values()).sort(
-    (a, b) => dayjs(a.time as string).valueOf() - dayjs(b.time as string).valueOf(),
+    (a, b) => (parsePingTimestampMs(a.time) ?? 0) - (parsePingTimestampMs(b.time) ?? 0),
   )
-
-  const range = appliedCustomRange.value
-  if (isCustomRange.value && range) {
-    const fromTs = range.start.valueOf()
-    const toTs = range.end.valueOf()
-    return merged.filter((item) => {
-      const timestamp = dayjs(item.time as string).valueOf()
-      return timestamp >= fromTs && timestamp <= toTs
-    })
-  }
-
-  const hours = selectedHours.value
-  const lastItem = merged.at(-1)
-  const lastTs = lastItem ? dayjs(lastItem.time as string).valueOf() : dayjs().valueOf()
-  const fromTs = lastTs - hours * 3600_000
-
-  let startIdx = 0
-  for (let i = 0; i < merged.length; i++) {
-    const item = merged[i]
-    if (!item)
-      continue
-    const ts = dayjs(item.time as string).valueOf()
-    if (ts >= fromTs) {
-      startIdx = Math.max(0, i - 1)
-      break
-    }
-  }
-
-  return merged.slice(startIdx)
+  return merged
 })
 
 const chartData = computed(() => {
@@ -490,7 +507,11 @@ const chartData = computed(() => {
 // ==================== 工具函数 ====================
 
 function formatTime(time: string, showDate: boolean): string {
-  const date = dayjs(time)
+  const timestamp = parsePingTimestampMs(time)
+  if (timestamp === null)
+    return '-'
+
+  const date = dayjs(timestamp)
   if (showDate) {
     return date.format('M/D HH:mm')
   }
@@ -498,7 +519,11 @@ function formatTime(time: string, showDate: boolean): string {
 }
 
 function formatTimeForTooltip(time: string, hours: number): string {
-  const date = dayjs(time)
+  const timestamp = parsePingTimestampMs(time)
+  if (timestamp === null)
+    return '-'
+
+  const date = dayjs(timestamp)
   if (hours < 24) {
     return date.format('HH:mm:ss')
   }

@@ -30,6 +30,26 @@ coverage
 .eslintcache
 
 .env.development
+
+# Local configuration and credentials
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+*.cer
+
+# Local data and captured traffic
+*.har
+*.sqlite
+*.sqlite3
+*.db
+
+# Release archives are published separately, never committed to main
+*.zip
+
 # Cypress
 /cypress/videos/
 /cypress/screenshots/

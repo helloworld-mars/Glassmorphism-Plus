@@ -387,7 +387,8 @@ export interface PingMetricTaskStats {
   total: number
   valid: number
   loss: number
-  loss_approximate: boolean
+  /** Komari 1.4.1 omits this field when the loss value is exact. */
+  loss_approximate?: boolean
   min?: number
   max?: number
   avg?: number

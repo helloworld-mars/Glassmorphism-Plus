@@ -45,7 +45,7 @@ jobs:
 
           const zeroSha = '0000000000000000000000000000000000000000'
           const beforeSha = process.env.BEFORE_SHA
-          const versionRe = /^\d+\.\d+\.\d+(?:[-+][0-9A-Z.-]+)?$/i
+          const versionRe = /^\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Z.-]+)?$/i
 
           function readJson(filePath) {
             return JSON.parse(readFileSync(filePath, 'utf8'))
@@ -141,4 +141,4 @@ jobs:
           overwrite_files: true
           fail_on_unmatched_files: true
           files: |
-            komari-theme-Glassmorphism-build*.zip
+            Glassmorphism-Plus.zip

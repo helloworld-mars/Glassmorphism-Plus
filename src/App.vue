@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
-import { nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
@@ -18,6 +18,11 @@ useVisitorPageAudit()
 
 const isReady = ref(false)
 const isRetryingConnection = ref(false)
+
+watch(() => appStore.siteName, (siteName) => {
+  document.title = siteName
+  document.querySelector<HTMLMetaElement>('meta[name="apple-mobile-web-app-title"]')?.setAttribute('content', siteName)
+}, { immediate: true })
 
 async function retryConnection(): Promise<void> {
   if (isRetryingConnection.value)
