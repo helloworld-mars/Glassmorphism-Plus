@@ -1,16 +1,19 @@
-import { spawnSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import process from 'node:process'
 import { createInterface } from 'node:readline/promises'
+import { fileURLToPath } from 'node:url'
 
-const VERSION_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Z.-]+)?$/i
+import { ensureReleaseWorkspace, THEME_VERSION_RE } from './release-paths'
+
 const VERSION_FIELD_RE = /^(\s*"version"\s*:\s*")([^"]*)(")/m
 const PATCH_VERSION_RE = /^(\d+)\.(\d+)\.(\d+)$/
 const VERSION_SOURCE_FILE = 'komari-theme.json'
+const PACKAGE_VERSION_FILE = 'package.json'
+const PROJECT_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 
 function readThemeVersion(): string {
-  const themeManifest = JSON.parse(readFileSync(resolve(process.cwd(), VERSION_SOURCE_FILE), 'utf8')) as { version?: unknown }
+  const themeManifest = JSON.parse(readFileSync(resolve(PROJECT_ROOT, VERSION_SOURCE_FILE), 'utf8')) as { version?: unknown }
 
   if (typeof themeManifest.version !== 'string') {
     throw new TypeError(`${VERSION_SOURCE_FILE} does not contain a top-level string version field`)
@@ -83,43 +86,77 @@ async function resolveVersion(): Promise<string> {
   }
 }
 
-function updateThemeVersion(version: string): void {
-  const filePath = resolve(process.cwd(), VERSION_SOURCE_FILE)
+interface VersionFileUpdate {
+  fileName: string
+  filePath: string
+  nextContent: string
+}
+
+function prepareVersionFileUpdate(fileName: string, version: string, required: boolean): VersionFileUpdate | undefined {
+  const filePath = resolve(PROJECT_ROOT, fileName)
   const content = readFileSync(filePath, 'utf8')
   const parsed = JSON.parse(content) as { version?: unknown }
 
   if (typeof parsed.version !== 'string') {
-    throw new TypeError(`${VERSION_SOURCE_FILE} does not contain a top-level string version field`)
+    if (required) {
+      throw new TypeError(`${fileName} does not contain a top-level string version field`)
+    }
+
+    return undefined
   }
 
   const nextContent = content.replace(VERSION_FIELD_RE, `$1${version}$3`)
 
   JSON.parse(nextContent)
-  writeFileSync(filePath, nextContent)
+  return { fileName, filePath, nextContent }
 }
 
-function gitAdd(files: string[]): void {
-  const result = spawnSync('git', ['add', ...files], {
-    cwd: process.cwd(),
-    stdio: 'inherit',
-  })
-
-  if (result.status !== 0) {
-    throw new Error('git add failed')
+function prepareProjectVersionUpdates(version: string): VersionFileUpdate[] {
+  const manifestUpdate = prepareVersionFileUpdate(VERSION_SOURCE_FILE, version, true)
+  if (!manifestUpdate) {
+    throw new Error(`Missing required version update for ${VERSION_SOURCE_FILE}`)
   }
+
+  const updates: VersionFileUpdate[] = [manifestUpdate]
+
+  // The manifest remains the canonical source; package.json only mirrors it when
+  // this repository already carries package metadata for the same project.
+  if (existsSync(resolve(PROJECT_ROOT, PACKAGE_VERSION_FILE))) {
+    const packageUpdate = prepareVersionFileUpdate(PACKAGE_VERSION_FILE, version, false)
+    if (packageUpdate) {
+      updates.push(packageUpdate)
+    }
+  }
+
+  return updates
+}
+
+function writeProjectVersionUpdates(updates: VersionFileUpdate[]): string[] {
+  for (const update of updates) {
+    writeFileSync(update.filePath, update.nextContent)
+  }
+
+  return updates.map(update => update.fileName)
 }
 
 async function main(): Promise<void> {
   const version = await resolveVersion()
 
-  if (!VERSION_RE.test(version)) {
+  if (!THEME_VERSION_RE.test(version)) {
     throw new Error(`Invalid version: ${version}`)
   }
 
-  updateThemeVersion(version)
-  gitAdd([VERSION_SOURCE_FILE])
+  const versionUpdates = prepareProjectVersionUpdates(version)
+  const releasePaths = ensureReleaseWorkspace(PROJECT_ROOT, version)
+  const versionFiles = writeProjectVersionUpdates(versionUpdates)
   console.log(`Prepared release version ${version}`)
   console.log(`Version source: ${VERSION_SOURCE_FILE}`)
+  console.log(`Updated version files: ${versionFiles.join(', ')}`)
+  console.log(`Release workspace: ${releasePaths.versionDirectory}`)
+  console.log(`Publish snapshot path: ${releasePaths.publishDirectory}`)
+  console.log(`Release snapshot path: ${releasePaths.releaseDirectory}`)
+  console.log(`Installer path: ${releasePaths.installerPath}`)
+  console.log('Git staging is intentionally manual; review and stage the selected publishing clone after copying validated source files.')
 }
 
 main().catch((error) => {

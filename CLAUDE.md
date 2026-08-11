@@ -18,9 +18,10 @@ Komari Glassmorphism is a Komari Monitor theme built with Vue 3 + Vite. The rele
 Key release facts:
 
 - [komari-theme.json](komari-theme.json) is release input and the only release-version source.
-- Do not add a top-level `version` to [package.json](package.json).
+- Do not use a top-level `version` in [package.json](package.json) as a release source; synchronize it only when it already exists as package metadata.
 - `bun run build` must preserve zip packaging from [vite.config.ts](vite.config.ts).
-- Build output must include `dist/` and `komari-theme-Glassmorphism-build-<short-sha>.zip`.
+- Build output must include `dist/` and `<source-parent>/<version>/Glassmorphism-Plus-release-<version>.zip`.
+- `bun run release:prepare` verifies that installer and creates the filtered `<source-parent>/<version>/Glassmorphism-Plus-release-<version>/` snapshot. Clone the sibling dynamic publish path separately so it retains its Git history; ZIP Release asset uploads are manual.
 - Zip layout must stay: `komari-theme.json`, `preview.png`, `dist/`.
 
 ## Commands
@@ -31,6 +32,7 @@ Use `bun` from the repository root:
 bun run dev
 bun run lint
 bun run build
+bun run release:prepare
 bun run preview
 ```
 

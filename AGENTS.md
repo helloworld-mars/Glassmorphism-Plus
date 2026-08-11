@@ -32,7 +32,9 @@ This repository builds a Komari theme package, not a generic deployed web app.
 
 Release contract:
 
-- `bun run build` must output `dist/` and `komari-theme-Glassmorphism-build-<short-sha>.zip`.
+- `bun run build` must output `dist/` and `<source-parent>/<version>/Glassmorphism-Plus-release-<version>.zip`, where `<version>` is read from [komari-theme.json](komari-theme.json).
+- `bun run release:prepare` verifies that installer ZIP and creates the populated `<source-parent>/<version>/Glassmorphism-Plus-release-<version>/` snapshot without overwriting a nonempty target. It does not create a publish clone or upload a Release asset.
+- Create `<source-parent>/<version>/Glassmorphism-Plus-publish-<version>/` separately by cloning the approved GitHub target after source review; preserve that clone's `.git` history.
 - Zip layout must stay: `komari-theme.json`, `preview.png`, `dist/`.
 - Packaged `preview.png` comes from [docs/preview.png](docs/preview.png).
 - Do not rename [komari-theme.json](komari-theme.json), [docs/preview.png](docs/preview.png), or the zip pattern.
@@ -45,6 +47,7 @@ Run from repo root only:
 bun run dev
 bun run lint
 bun run build
+bun run release:prepare
 bun run preview
 ```
 
@@ -60,7 +63,7 @@ There is no test suite. Do not invent `bun test` / Vitest commands.
 - [public/images/](public/images/) — runtime image contract.
 - [.github/workflows/release-on-version-bump.yml](.github/workflows/release-on-version-bump.yml) — release automation.
 - [vite.config.ts](vite.config.ts) — Vite config, build constants, manual chunks, zip packaging.
-- [package.json](package.json) — bun scripts and dependencies; intentionally no top-level `version`.
+- [package.json](package.json) — Bun scripts and dependencies; an existing top-level `version` mirrors the manifest but is not a release-version source.
 
 ## Architecture anchor
 
@@ -84,7 +87,7 @@ Quick placement guide:
 
 ## Safeguards
 
-- [komari-theme.json](komari-theme.json) is the only release-version source; do not add `package.json.version`.
+- [komari-theme.json](komari-theme.json) is the only release-version source; if `package.json.version` already exists, keep it synchronized as metadata but do not treat it as a source.
 - Default node card size must remain `compact`; `mini` is optional.
 - Realtime node metrics must update without page refresh; node indexes must point to Vue-reactive node objects.
 - Public home/detail routes stay public; sensitive actions/data paths perform permission checks instead of router guards.

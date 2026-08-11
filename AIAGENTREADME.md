@@ -23,8 +23,8 @@
 
 - 主题清单：[komari-theme.json](komari-theme.json)。这是发布输入，不是可选元数据。
 - 版本唯一来源：[komari-theme.json](komari-theme.json) 的 `version`。
-- 不要在 [package.json](package.json) 重新添加顶层 `version`。
-- 打包产物：`komari-theme-Glassmorphism-build-<short-sha>.zip`。
+- 不要将 [package.json](package.json) 的顶层 `version` 作为 release source；若该 metadata 已存在，应与 manifest 同步。
+- 打包产物：`<source-parent>/<version>/Glassmorphism-Plus-release-<version>.zip`。
 - zip 内固定包含：`komari-theme.json`、`preview.png`、`dist/`。
 - `preview.png` 来自 [docs/preview.png](docs/preview.png)，打包时重命名。
 
@@ -57,6 +57,7 @@
 ```bash
 bun run dev       # Vite dev server，代理 /api 到配置目标
 bun run build     # vue-tsc --build + vite build + zip packaging
+bun run release:prepare # verify installer ZIP and create the filtered release snapshot
 bun run preview   # 预览 production build
 bun run lint      # eslint --fix --cache
 ```
@@ -89,10 +90,10 @@ bun run build
 
 `bun run build` 必须保留 [vite.config.ts](vite.config.ts) 里的 Komari zip 插件流程。
 
-成功后根目录应有：
+成功后 source 根目录应有：
 
 - `dist/`
-- `komari-theme-Glassmorphism-build-<short-sha>.zip`
+- `<source-parent>/<version>/Glassmorphism-Plus-release-<version>.zip`
 
 zip 固定结构：
 
@@ -101,6 +102,8 @@ komari-theme.json
 preview.png
 dist/
 ```
+
+`bun run release:prepare` only creates the populated `<source-parent>/<version>/Glassmorphism-Plus-release-<version>/` snapshot after verifying the ZIP. Create the sibling `Glassmorphism-Plus-publish-<version>/` separately by cloning the approved publishing repository so its `.git` history remains intact. Release ZIP uploads are manual.
 
 Vite 注入的全局常量：
 
@@ -391,12 +394,12 @@ HomeView tool button
 
 ### 12.5 改发布逻辑或版本
 
-1. 只改 [komari-theme.json](komari-theme.json) 的 `version`。
-2. 不要给 [package.json](package.json) 加顶层 version。
-3. 本地跑 `bun run build`。
-4. 推送后查 GitHub Actions。
-5. 查 Release tag 和 zip asset。
-6. 在 [AICACHE.md](AICACHE.md) 记录验证链接/结果。
+1. 更新 [komari-theme.json](komari-theme.json) 的 `version`；如果 [package.json](package.json) 已有顶层 `version` metadata，也同步它，但不能把它当作 release source。
+2. 本地跑 `bun run build`，确认生成动态版本路径的安装 ZIP。
+3. 跑 `bun run release:prepare`，建立并验证过滤后的 release snapshot。
+4. 在动态 publish 路径 clone 已核准的 GitHub target，审查后同步有效 source、提交并推送。
+5. 如需 Tag / GitHub Release，手动 dispatch workflow；不要上传 ZIP asset。由维护者手动上传已验证的版本 ZIP。
+6. 查 Release tag、Release 页面与 Actions，并在 [AICACHE.md](AICACHE.md) 记录验证链接/结果。
 
 ## 13. 里程碑边界
 
@@ -470,7 +473,7 @@ HomeView tool button
 - 把私有功能做成只隐藏按钮，不做真正 permission check。
 - 修改 public image 文件名但不改 helper mapping。
 - 新增大依赖但不检查 Vite manual chunks。
-- 把 release version 放到 package.json。
+- 把 package.json 的 metadata version 当作 release source，或在它已经存在时不同步。
 - 用本地 build 成功代替 Release 检查。
 - 修改 default card size，让 `mini` 替代或缩水 `compact`。
 

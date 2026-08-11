@@ -37,12 +37,12 @@
 
 | 项目     | 说明                                                      |
 | :------- | :-------------------------------------------------------- |
-| 当前版本 | **v1.3.1**                                                |
+| 当前版本 | **v1.3.2**                                                |
 | 主题定位 | Komari Monitor 可导入 zip 主题，不是普通 Web App 部署包   |
 | 视觉风格 | 毛玻璃卡片、动态背景、浅色 / 深色 / 北京时间自动日夜模式  |
 | 数据能力 | Metric Store 优先，旧接口自动 fallback，兼容 Komari 1.2.x |
 | 高级工具 | 拓扑、性价比、健康摘要、快照导出、访客安全审计            |
-| 发布产物 | `Glassmorphism-Plus.zip`                                  |
+| 发布产物 | `<version>/Glassmorphism-Plus-release-<version>.zip`      |
 
 > 好看只是外壳。v3 真正的重点，是把 Metric、Ping、流量、费用、健康分析和运维工具整合成日常真的会打开来看的监控面板。
 
@@ -52,7 +52,7 @@
 
 - 当前维护者为 [helloworld-mars](https://github.com/helloworld-mars)，发布仓库为 [Glassmorphism-Plus](https://github.com/helloworld-mars/Glassmorphism-Plus)。
 - 本主题基于 [sanrokamlan 的原始 Glassmorphism 主题](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism) 二次开发；原始来源与署名会持续保留。
-- 本地构建固定生成 `Glassmorphism-Plus.zip`，其顶层结构保持 Komari 所需的 `komari-theme.json`、`preview.png` 与 `dist/`。
+- 本地构建依 `komari-theme.json` 的版本生成 `<version>/Glassmorphism-Plus-release-<version>.zip`，其顶层结构保持 Komari 所需的 `komari-theme.json`、`preview.png` 与 `dist/`。
 
 ---
 
@@ -432,7 +432,7 @@ https://github.com/helloworld-mars/Glassmorphism-Plus
 ### 方式二：手动安装 Release
 
 1. 打开 [Releases](https://github.com/helloworld-mars/Glassmorphism-Plus/releases)
-2. 下载最新的 `Glassmorphism-Plus.zip`
+2. 下载最新的 `Glassmorphism-Plus-release-<version>.zip`
 3. 登录 Komari Monitor 后台，进入 **设置 → 主题管理**
 4. 上传 zip 并启用主题
 5. 在主题设置中调整视觉、卡片、快捷控制和高级工具
@@ -444,7 +444,7 @@ https://github.com/helloworld-mars/Glassmorphism-Plus
 早期 Plus 安装包错误地使用了原主题的 `short: Glassmorphism`。Komari 以 `short` 作为主题目录、导入覆盖检测和主题设置命名空间的唯一标识；因此本版改为独立的 `glassmorphism-plus`，不会再覆盖原主题，但也不会自动复制旧命名空间中的主题设置。
 
 1. 在升级前记录旧主题设置，尤其是“首页节点卡片延迟任务绑定”的 JSON。
-2. 上传本版 `Glassmorphism-Plus.zip`，启用 **Komari Glassmorphism Plus**。
+2. 上传本版 `Glassmorphism-Plus-release-<version>.zip`，启用 **Komari Glassmorphism Plus**。
 3. 在新主题的设置页恢复需要的设置和延迟任务绑定，确认首页正常后再继续使用。
 4. 只有确认旧的 `Glassmorphism` 项目不是原主题且不再需要时，才在 Komari 后台删除它；不要删除真正的原版主题。
 
@@ -459,6 +459,7 @@ bun install
 bun run dev
 bun run lint
 bun run build
+bun run release:prepare
 bun run test:visual
 bun run preview
 ```
@@ -474,7 +475,7 @@ bun run test:visual:update
 构建成功后会生成：
 
 - `dist/`
-- `Glassmorphism-Plus.zip`
+- `../<version>/Glassmorphism-Plus-release-<version>.zip`
 
 发布包固定包含：
 
@@ -484,7 +485,9 @@ preview.png
 dist/
 ```
 
-> Komari 后台显示的主题版本以 [`komari-theme.json`](komari-theme.json) 顶层 `version` 为准；`package.json` 的 `1.3.1` 仅用于 Node/Bun 工具元数据。
+> Komari 后台显示的主题版本以 [`komari-theme.json`](komari-theme.json) 顶层 `version` 为准；`package.json` 的 `1.3.2` 仅用于 Node/Bun 工具元数据。
+
+生成 ZIP 后，`bun run release:prepare` 会先验证 ZIP 根目录 metadata 的版本，再创建含 `dist/` 的 `<source-parent>/<version>/Glassmorphism-Plus-release-<version>/` 完整 source snapshot。它不会创建 publish clone。发布前应另行在 `<source-parent>/<version>/Glassmorphism-Plus-publish-<version>/` clone 已核准的 GitHub target，保留其 `.git` 历史，再将审核通过的 source 同步进去。安装 ZIP 最终由维护者手动上传到 GitHub Release Assets。
 
 ---
 

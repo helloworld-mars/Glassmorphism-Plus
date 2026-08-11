@@ -73,6 +73,16 @@ const lossPingBarsRef = ref<HTMLDivElement>()
 const { width: latencyPingBarsWidth } = useElementSize(latencyPingBarsRef)
 const { width: lossPingBarsWidth } = useElementSize(lossPingBarsRef)
 
+type PingPanelMetric = 'latency' | 'loss'
+
+function setLatencyPingBarsRef(element: unknown): void {
+  latencyPingBarsRef.value = element instanceof HTMLDivElement ? element : undefined
+}
+
+function setLossPingBarsRef(element: unknown): void {
+  lossPingBarsRef.value = element instanceof HTMLDivElement ? element : undefined
+}
+
 const formatBytes = (bytes: number) => formatBytesWithConfig(bytes, appStore.byteDecimals)
 const formatBytesPerSecond = (bytes: number) => formatBytesPerSecondWithConfig(bytes, appStore.byteDecimals)
 const offlineTime = computed(() => formatDateTime(props.node.time))
@@ -122,6 +132,26 @@ function getPingBarGridStyle(width: number, barCount: number): Record<string, st
 
 const latencyPingBarGridStyle = computed(() => getPingBarGridStyle(latencyPingBarsWidth.value, latencyRenderBars.value.length))
 const lossPingBarGridStyle = computed(() => getPingBarGridStyle(lossPingBarsWidth.value, lossRenderBars.value.length))
+const nodeCardPingPanels = computed(() => [
+  {
+    metric: 'latency' as const satisfies PingPanelMetric,
+    label: '延迟',
+    display: latencyDisplay.value,
+    tooltip: latencyPanelTooltip.value,
+    bars: latencyRenderBars.value,
+    barGridStyle: latencyPingBarGridStyle.value,
+    setBarsRef: setLatencyPingBarsRef,
+  },
+  {
+    metric: 'loss' as const satisfies PingPanelMetric,
+    label: '丢包',
+    display: lossDisplay.value,
+    tooltip: lossPanelTooltip.value,
+    bars: lossRenderBars.value,
+    barGridStyle: lossPingBarGridStyle.value,
+    setBarsRef: setLossPingBarsRef,
+  },
+])
 
 const trafficUsedPercentage = computed(() => getTrafficUsedPercentage(props.node))
 const trafficUsed = computed(() => getTrafficUsed(props.node))
@@ -482,56 +512,28 @@ function hasRegion(region: string | null | undefined): boolean {
         <!-- 延迟 + 丢包 -->
         <div class="grid grid-cols-2 gap-1.5">
           <button
+            v-for="panel in nodeCardPingPanels"
+            :key="panel.metric"
             type="button"
             class="group/panel relative flex flex-col rounded-lg bg-slate-500/5"
             :class="[nodeCardPingPanelClass, nodeCardPanelClass, !props.node.online ? 'blur-xs opacity-50' : '']"
-            :title="latencyPanelTooltip"
-            :aria-label="`${props.node.name} 延迟监测`"
+            :data-node-ping-panel="panel.metric"
+            :title="panel.tooltip"
+            :aria-label="`${props.node.name} ${panel.label}监测`"
             @click.stop="emit('pingClick')"
           >
-            <div class="flex items-center justify-between text-[11px] leading-none">
-              <span class="text-muted-foreground">延迟</span>
-              <span class="font-medium">{{ latencyDisplay }}</span>
+            <div :data-node-ping-header="panel.metric" class="flex items-center justify-between text-[11px] leading-none">
+              <span class="text-muted-foreground">{{ panel.label }}</span>
+              <span class="font-medium">{{ panel.display }}</span>
             </div>
             <div
-              ref="latencyPingBarsRef"
-              data-node-ping-bars="latency"
+              :ref="panel.setBarsRef"
+              :data-node-ping-bars="panel.metric"
               class="grid min-h-0 min-w-0 w-full flex-1 items-end gap-[1px] opacity-80 group-hover/panel:opacity-100"
-              :style="latencyPingBarGridStyle"
+              :style="panel.barGridStyle"
             >
               <DataTooltip
-                v-for="bar in latencyRenderBars" :key="bar.key"
-                data-node-ping-bar
-                placement="top" :content="bar.tooltip" class="h-full min-w-0 w-full"
-              >
-                <span
-                  class="block h-full w-full rounded-[1px] transition-transform duration-150 group-hover/data-tooltip:scale-y-160 group-hover/panel:opacity-60 group-hover/data-tooltip:!opacity-100"
-                  :class="bar.className"
-                />
-              </DataTooltip>
-            </div>
-          </button>
-
-          <button
-            type="button"
-            class="group/panel relative flex flex-col rounded-lg bg-slate-500/5"
-            :class="[nodeCardPingPanelClass, nodeCardPanelClass, !props.node.online ? 'blur-xs opacity-50' : '']"
-            :title="lossPanelTooltip"
-            :aria-label="`${props.node.name} 丢包监测`"
-            @click.stop="emit('pingClick')"
-          >
-            <div class="flex items-center justify-between text-[11px] leading-none">
-              <span class="text-muted-foreground">丢包</span>
-              <span class="font-medium">{{ lossDisplay }}</span>
-            </div>
-            <div
-              ref="lossPingBarsRef"
-              data-node-ping-bars="loss"
-              class="grid min-h-0 min-w-0 w-full flex-1 items-end gap-[1px] opacity-80 group-hover/panel:opacity-100"
-              :style="lossPingBarGridStyle"
-            >
-              <DataTooltip
-                v-for="bar in lossRenderBars" :key="bar.key"
+                v-for="bar in panel.bars" :key="bar.key"
                 data-node-ping-bar
                 placement="top" :content="bar.tooltip" class="h-full min-w-0 w-full"
               >

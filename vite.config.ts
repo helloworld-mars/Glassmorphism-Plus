@@ -2,7 +2,7 @@ import type { Plugin } from 'vite'
 import { execSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { resolve } from 'node:path'
+import { relative, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath, URL } from 'node:url'
 import tailwindcss from '@tailwindcss/vite'
@@ -10,6 +10,8 @@ import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
 
 import vueDevTools from 'vite-plugin-vue-devtools'
+
+import { ensureReleaseWorkspace } from './scripts/release-paths'
 
 const require = createRequire(import.meta.url)
 const fs = require('node:fs')
@@ -60,11 +62,11 @@ function komariThemeZip(): Plugin {
     name: 'komari-theme-zip',
     apply: 'build',
     closeBundle: async () => {
-      const zipFileName = 'Glassmorphism-Plus.zip'
       const distDir = resolve(__dirname, 'dist')
       const previewPath = resolve(__dirname, 'docs/preview.png')
-      const outputPath = resolve(__dirname, zipFileName)
       const themeManifest = readThemeManifest()
+      const releasePaths = ensureReleaseWorkspace(__dirname, getThemeVersion())
+      const { installerPath: outputPath } = releasePaths
       const manifestPreviewName = typeof themeManifest.preview === 'string' && themeManifest.preview.trim()
         ? themeManifest.preview.trim()
         : 'preview.png'
@@ -80,7 +82,8 @@ function komariThemeZip(): Plugin {
       return new Promise((resolve, reject) => {
         output.on('close', () => {
           const sizeMB = (archive.pointer() / 1024 / 1024).toFixed(2)
-          console.log(`[komari-theme-zip] Created ${zipFileName} (${sizeMB} MB)`)
+          console.log(`[komari-theme-zip] Created ${relative(__dirname, outputPath)} (${sizeMB} MB)`)
+          console.log(`[komari-theme-zip] Reserved snapshot paths: ${relative(__dirname, releasePaths.publishDirectory)}, ${relative(__dirname, releasePaths.releaseDirectory)}`)
           resolve(undefined)
         })
 

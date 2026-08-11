@@ -96,6 +96,44 @@ async function expectUniformNodeCardPingBars(card: Locator): Promise<void> {
   }
 }
 
+async function readNodeCardPingPanelVerticalGeometry(card: Locator, metric: 'latency' | 'loss') {
+  return card.locator(`[data-node-ping-panel="${metric}"]`).evaluate((element, panelMetric) => {
+    const header = element.querySelector<HTMLElement>(`[data-node-ping-header="${panelMetric}"]`)
+    const bars = element.querySelector<HTMLElement>(`[data-node-ping-bars="${panelMetric}"]`)
+    if (!header || !bars)
+      return null
+
+    const panelRect = element.getBoundingClientRect()
+    const headerRect = header.getBoundingClientRect()
+    const barsRect = bars.getBoundingClientRect()
+    return {
+      panel: { top: panelRect.top, bottom: panelRect.bottom },
+      header: { top: headerRect.top, bottom: headerRect.bottom },
+      bars: { top: barsRect.top, bottom: barsRect.bottom },
+    }
+  }, metric)
+}
+
+async function expectMatchingNodeCardPingPanelVerticalGeometry(card: Locator): Promise<void> {
+  await expect.poll(async () => {
+    const [latency, loss] = await Promise.all([
+      readNodeCardPingPanelVerticalGeometry(card, 'latency'),
+      readNodeCardPingPanelVerticalGeometry(card, 'loss'),
+    ])
+    if (!latency || !loss)
+      return false
+
+    return [
+      [latency.panel.top, loss.panel.top],
+      [latency.panel.bottom, loss.panel.bottom],
+      [latency.header.top, loss.header.top],
+      [latency.header.bottom, loss.header.bottom],
+      [latency.bars.top, loss.bars.top],
+      [latency.bars.bottom, loss.bars.bottom],
+    ].every(([latencyY, lossY]) => Math.abs(latencyY! - lossY!) <= 0.01)
+  }).toBe(true)
+}
+
 test('Ping timestamps use one strict [start, end) twenty-bucket contract', () => {
   const start = Date.parse('2026-07-25T19:59:00.000Z')
   const end = Date.parse('2026-07-25T20:59:00.000Z')
@@ -145,13 +183,13 @@ test('brand metadata and homepage footer retain current and original attribution
     name: 'Komari Glassmorphism Plus',
     short: 'glassmorphism-plus',
     description: 'A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.',
-    version: '1.3.1',
+    version: '1.3.2',
     author: 'helloworld-mars',
     url: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(packageMetadata).toMatchObject({
     name: 'komari-theme-glassmorphism-plus',
-    version: '1.3.1',
+    version: '1.3.2',
     homepage: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(themeManifest.short).toMatch(/^[\w-]+$/)
@@ -181,7 +219,7 @@ test('brand metadata and homepage footer retain current and original attribution
 
   const footer = page.locator('footer')
   await expect(footer.getByRole('link', { name: 'Glassmorphism Plus' })).toHaveAttribute('href', 'https://github.com/helloworld-mars/Glassmorphism-Plus')
-  await expect(footer.getByText('v1.3.1 · helloworld-mars', { exact: true }).first()).toBeVisible()
+  await expect(footer.getByText('v1.3.2 · helloworld-mars', { exact: true }).first()).toBeVisible()
   await expect(footer.getByRole('link', { name: 'Based on the original theme by sanrokamlan' }))
     .toHaveAttribute('href', 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism')
   await expect(footer).not.toContainText('unknown')
@@ -529,17 +567,21 @@ test.describe('node-card per-node ping task bindings', () => {
 
     const primaryCard = primaryNodeCard(page)
     await expectUniformNodeCardPingBars(primaryCard)
+    await expectMatchingNodeCardPingPanelVerticalGeometry(primaryCard)
 
     await page.setViewportSize({ width: 390, height: 844 })
     await expectUniformNodeCardPingBars(primaryCard)
+    await expectMatchingNodeCardPingPanelVerticalGeometry(primaryCard)
 
     const offlineCard = page.getByRole('button', { name: '查看节点 伦敦-离线归档 详情' })
     await expectUniformNodeCardPingBars(offlineCard)
+    await expectMatchingNodeCardPingPanelVerticalGeometry(offlineCard)
 
     const resumePingResponses = fixture.pausePingResponses()
     await page.reload({ waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
     await expectUniformNodeCardPingBars(primaryNodeCard(page))
+    await expectMatchingNodeCardPingPanelVerticalGeometry(primaryNodeCard(page))
     resumePingResponses()
   })
 
@@ -552,6 +594,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await openStablePage(page)
     await expectNodeCardPing(page, '-', '-')
     await expectUniformNodeCardPingBars(primaryNodeCard(page))
+    await expectMatchingNodeCardPingPanelVerticalGeometry(primaryNodeCard(page))
   })
 
   test('12 valid bindings load one task catalog and only their selected Metric pairs', async ({ page }) => {
