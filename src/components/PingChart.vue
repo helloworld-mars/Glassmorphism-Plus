@@ -17,9 +17,8 @@ import { loadPingRecordsWithTasks } from '@/services/history.service'
 import { loadPingMetricStats, loadPublicPingTasks, queryMetrics } from '@/services/metrics.service'
 import { useAppStore } from '@/stores/app'
 import { ACCESSIBLE_LINE_TYPES, getChartSeriesPalette } from '@/utils/chartPalette'
-import { isPingMetric, normalizeMetricSeriesList, orderPingTasksByBackend, PING_LATENCY_METRIC, pingTaskId, pingTaskName } from '@/utils/metricSeries'
+import { isPingMetric, normalizeMetricSeriesList, orderPingTasksByBackend, PING_LATENCY_METRIC, PING_LOSS_METRIC, pingTaskId, pingTaskName } from '@/utils/metricSeries'
 import { createNextAlignedPingTimeWindow, createPingTimeWindow, isPingTimestampInWindow, parsePingTimestampMs } from '@/utils/pingTime'
-import { cutPeakValues, interpolateNullsLinear } from '@/utils/recordHelper'
 import '@/utils/echarts' // 共享 ECharts 配置
 
 const props = defineProps<{
@@ -33,6 +32,11 @@ interface CustomRange {
   start: dayjs.Dayjs
   end: dayjs.Dayjs
   hours: number
+}
+
+interface PingChartTaskInfo extends PingTaskInfo {
+  /** A Metric latency series can be useful before the optional loss summary arrives. */
+  lossAvailable?: boolean
 }
 
 // 图表主题相关颜色
@@ -152,7 +156,7 @@ watch(availableViews, (views) => {
 
 // ==================== 数据状态 ====================
 const remoteData = shallowRef<PingRecord[]>([])
-const tasks = shallowRef<PingTaskInfo[]>([])
+const tasks = shallowRef<PingChartTaskInfo[]>([])
 const activeTimeWindow = shallowRef<PingTimeWindow | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -160,10 +164,8 @@ const legacyCustomRangeFallback = ref(false)
 
 // 任务选择
 const selectedTaskIds = ref<number[]>([])
-const cutPeak = ref(false)
 const isTouchTooltipMode = ref(false)
 const activeTaskTooltipId = ref<number | null>(null)
-const smoothInfoTooltipOpen = ref(false)
 
 const chartMargin = { top: 30, right: 24, bottom: 52, left: 56 }
 let coarsePointerMediaQuery: MediaQueryList | null = null
@@ -189,17 +191,6 @@ function toggleTaskTooltip(taskId: number) {
     return
 
   activeTaskTooltipId.value = activeTaskTooltipId.value === taskId ? null : taskId
-  smoothInfoTooltipOpen.value = false
-}
-
-function toggleSmoothInfoTooltip() {
-  if (!isTouchTooltipMode.value)
-    return
-
-  smoothInfoTooltipOpen.value = !smoothInfoTooltipOpen.value
-  if (smoothInfoTooltipOpen.value) {
-    activeTaskTooltipId.value = null
-  }
 }
 
 function normalizeMetricTaskId(taskId: string): number {
@@ -216,12 +207,16 @@ function normalizeMetricTaskId(taskId: string): number {
   return Math.abs(hash)
 }
 
-function normalizeMetricTask(stat: PingMetricTaskStats): PingTaskInfo {
+function normalizeMetricTask(stat: PingMetricTaskStats): PingChartTaskInfo {
+  const lossAvailable = stat.total > 0 && Number.isFinite(stat.loss)
   return {
     id: normalizeMetricTaskId(stat.task_id),
     name: stat.name?.trim() || pingTaskName(stat) || `Task ${stat.task_id}`,
     interval: stat.interval ?? 0,
-    loss: stat.loss,
+    // Keep the mandatory display field typed while explicitly marking an
+    // unavailable summary. The raw latency records remain usable either way.
+    loss: lossAvailable ? stat.loss : 0,
+    lossAvailable,
     min: stat.min,
     max: stat.max,
     avg: typeof stat.avg === 'number' && Number.isFinite(stat.avg) ? stat.avg : undefined,
@@ -285,7 +280,7 @@ function filterRecordsToWindow(records: PingRecord[], window: PingTimeWindow): P
 async function loadMetricPingPayload(
   nodeUuid: string,
   window: PingTimeWindow,
-): Promise<{ records: PingRecord[], tasks: PingTaskInfo[] } | null> {
+): Promise<{ records: PingRecord[], tasks: PingChartTaskInfo[] } | null> {
   const metricRangeParams = {
     start: new Date(window.start).toISOString(),
     end: new Date(window.end).toISOString(),
@@ -294,7 +289,10 @@ async function loadMetricPingPayload(
   const [statsResult, metricsResult, publicTasksResult] = await Promise.allSettled([
     loadPingMetricStats({ entity_id: nodeUuid, ...metricRangeParams, max_points: PING_RECORD_MAX_COUNT }),
     queryMetrics({
-      metric_keys: [PING_LATENCY_METRIC],
+      // The chart renders raw latency only, but requesting the paired raw loss
+      // series lets the shared Metric window cache carry real 100%-loss
+      // observations back to the matching NodeCard without inventing a value.
+      metric_keys: [PING_LATENCY_METRIC, PING_LOSS_METRIC],
       entity_id: nodeUuid,
       ...metricRangeParams,
       downsample: true,
@@ -308,31 +306,28 @@ async function loadMetricPingPayload(
   const metricStats = statsResult.status === 'fulfilled'
     ? (statsResult.value.stats ?? []).filter(stat => stat.entity_id === nodeUuid)
     : []
+  const metricSeries = metricsResult.status === 'fulfilled'
+    ? normalizeMetricSeriesList(metricsResult.value.series).filter(series => series.entity_id === nodeUuid && isPingMetric(series))
+    : []
   const metricRecords = metricsResult.status === 'fulfilled'
-    ? buildMetricRecords(metricsResult.value.series, nodeUuid, window)
+    ? buildMetricRecords(metricSeries, nodeUuid, window)
     : []
 
-  const metricTaskIds = new Set(metricRecords.map(record => record.task_id))
-  const exactStatTaskIds = new Set(
-    metricStats
-      .filter(stat => stat.total > 0 && !stat.loss_approximate && Number.isFinite(stat.loss))
-      .map(stat => normalizeMetricTaskId(stat.task_id)),
-  )
-  if (!metricRecords.length || [...metricTaskIds].some(taskId => !exactStatTaskIds.has(taskId)))
+  // The Metric latency series is the authoritative chart data. Statistics are
+  // supplementary metadata and can arrive later or omit loss fields, so they
+  // must never cause a successful raw series to fall back to the legacy API.
+  if (!metricRecords.length)
     return null
 
-  const taskMap = new Map<number, PingTaskInfo>()
+  const taskMap = new Map<number, PingChartTaskInfo>()
   for (const stat of metricStats) {
     const task = normalizeMetricTask(stat)
+    if (!Number.isFinite(task.id))
+      continue
     taskMap.set(task.id, task)
   }
 
-  for (const series of normalizeMetricSeriesList(
-    metricsResult.status === 'fulfilled' ? metricsResult.value.series : [],
-  ).filter(isPingMetric)) {
-    if (series.entity_id !== nodeUuid)
-      continue
-
+  for (const series of metricSeries) {
     const taskId = normalizeMetricTaskId(pingTaskId(series))
     if (!taskId || taskMap.has(taskId))
       continue
@@ -342,6 +337,8 @@ async function loadMetricPingPayload(
       name: pingTaskName(series) || `Task ${taskId}`,
       interval: series.interval_seconds ?? 0,
       loss: 0,
+      lossAvailable: false,
+      loss_approximate: true,
     })
   }
 
@@ -439,47 +436,20 @@ const mergedData = computed(() => {
   if (!data.length || !window)
     return []
 
-  const taskList = tasks.value
-
-  const taskIntervals = taskList
-    .map(t => t.interval)
-    .filter((v): v is number => typeof v === 'number' && v > 0)
-
-  const fallbackIntervalSec = taskIntervals.length ? Math.min(...taskIntervals) : 60
-  const toleranceMs = Math.min(
-    6000,
-    Math.max(800, Math.floor(fallbackIntervalSec * 1000 * 0.25)),
-  )
-
   const grouped: Map<number, Record<string, unknown>> = new Map()
-  const anchors: number[] = []
 
   for (const rec of data) {
     const ts = parsePingTimestampMs(rec.time)
     if (ts === null || !isPingTimestampInWindow(ts, window))
       continue
 
-    let anchor: number | null = null
+    // Do not coalesce near-by samples. A task's exact source timestamp is
+    // meaningful Ping data; combining a <=6s neighbour manufactures a shared
+    // sampling instant that the backend never reported.
+    if (!grouped.has(ts))
+      grouped.set(ts, { time: rec.time })
 
-    for (let index = anchors.length - 1; index >= 0; index--) {
-      const a = anchors[index]
-      if (a === undefined || ts - a > toleranceMs)
-        break
-      if (Math.abs(a - ts) <= toleranceMs) {
-        anchor = a
-        break
-      }
-    }
-
-    const useTs = anchor ?? ts
-    if (!grouped.has(useTs)) {
-      grouped.set(useTs, { time: dayjs(useTs).toISOString() })
-      if (anchor === null) {
-        anchors.push(useTs)
-      }
-    }
-
-    const group = grouped.get(useTs)!
+    const group = grouped.get(ts)!
     group[rec.task_id] = rec.value < 0 ? null : rec.value
   }
 
@@ -490,25 +460,11 @@ const mergedData = computed(() => {
 })
 
 const chartData = computed(() => {
-  let data = mergedData.value
-  const selectedKeys = selectedTaskIds.value.map(String)
-
-  if (selectedKeys.length === 0)
+  if (selectedTaskIds.value.length === 0)
     return []
 
-  if (cutPeak.value) {
-    data = cutPeakValues(data, selectedKeys)
-  }
-
-  if (selectedKeys.length > 0 && data.length > 0) {
-    data = interpolateNullsLinear(data, selectedKeys, {
-      maxGapMultiplier: 6,
-      minCapMs: 2 * 60_000,
-      maxCapMs: 30 * 60_000,
-    })
-  }
-
-  return data
+  // Raw Ping history only: no peak filtering or gap filling.
+  return mergedData.value
 })
 
 // ==================== 工具函数 ====================
@@ -643,7 +599,7 @@ const pingChartOption = computed(() => {
       name: task.name,
       type: 'line' as const,
       data: data.map(d => d[task.id] as number | null ?? null),
-      smooth: cutPeak.value ? 0.6 : 0.1,
+      smooth: false,
       showSymbol: false,
       connectNulls: false,
       lineStyle: { width: 1.5, color, cap: 'round' as const, type: lineType },
@@ -754,7 +710,6 @@ watch(() => props.uuid, () => {
   tasks.value = []
   selectedTaskIds.value = []
   activeTaskTooltipId.value = null
-  smoothInfoTooltipOpen.value = false
   fetchRecords()
 })
 
@@ -941,7 +896,7 @@ onBeforeUnmount(() => {
                   {{ task.avg !== undefined ? `${Math.round(task.avg)}ms` : '-' }}
                 </span>
                 <span class="opacity-60">·</span>
-                <span title="丢包率">{{ task.loss.toFixed(2) }}%{{ task.loss_approximate ? '≈' : '' }}</span>
+                <span title="丢包率">{{ task.lossAvailable === false ? '-' : `${task.loss.toFixed(2)}%${task.loss_approximate ? '≈' : ''}` }}</span>
                 <template v-if="task.p99_p50_ratio !== undefined">
                   <span class="opacity-60">·</span>
                   <span title="波动率">{{ task.p99_p50_ratio.toFixed(2) }}</span>
@@ -949,33 +904,6 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
-        </div>
-
-        <!-- 平滑峰值开关 -->
-        <div class="flex flex-wrap gap-4 items-center py-2 justify-between">
-          <TooltipProvider>
-            <div class="flex gap-2 items-center">
-              <Button
-                variant="ghost" size="xs" class="h-7 rounded-sm bg-background/50 hover:bg-background border-none"
-                :class="cutPeak && 'shadow-[0_0_0_2px] shadow-green-600/10 text-green-600'" @click="cutPeak = !cutPeak"
-              >
-                平滑峰值
-              </Button>
-              <Tooltip
-                :open="isTouchTooltipMode ? smoothInfoTooltipOpen : undefined"
-                @update:open="(open) => smoothInfoTooltipOpen = open"
-              >
-                <TooltipTrigger as-child>
-                  <Button variant="ghost" size="icon-xs" class="text-slate-500" @click.stop="toggleSmoothInfoTooltip">
-                    <Icon icon="carbon:information" :width="14" :height="14" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <span>使用 EWMA 算法平滑数据并过滤突变值</span>
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </TooltipProvider>
         </div>
 
         <!-- 图表 -->

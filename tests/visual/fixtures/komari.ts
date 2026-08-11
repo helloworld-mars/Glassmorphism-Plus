@@ -39,11 +39,21 @@ export interface VisualFixtureOptions {
 
 export interface NodeCardPingFixture {
   metric?: 'valid' | 'error' | 'malformed' | 'selected-empty'
-  legacy?: 'valid' | 'selected-empty'
+  legacy?: 'valid' | 'error' | 'selected-empty'
   metricErrorUuids?: string[]
+  /** Fail only NodeCard-style tagged raw Metric queries; Detail remains untagged. */
+  metricErrorWhenTaggedTaskIds?: number[]
+  legacyErrorUuids?: string[]
   legacyEmptyUuids?: string[]
   sampleCount?: number
   sampleTimes?: Array<string | number>
+  /**
+   * Deterministic ingestion timeline for the v1.3.3 NodeCard regression.
+   * `sampleAt` is the real probe timestamp; the sample only becomes visible
+   * to an RPC response at `apiVisibleAt`. It intentionally does not model a
+   * browser cache or a persisted storage state.
+   */
+  sampleSchedule?: NodeCardPingScheduledSample[]
   metricQueryOmitTaskIds?: number[]
   task202Exists?: boolean
   task202Assigned?: boolean
@@ -51,6 +61,33 @@ export interface NodeCardPingFixture {
   task202Loss?: number
   /** Sanitized shape observed in Komari 1.4.1 HAR responses. */
   komari141HarShape?: boolean
+}
+
+export interface NodeCardPingScheduledSample {
+  sampleAt: string | number
+  apiVisibleAt: string | number
+  latency: number | null
+  loss: number
+  taskId?: number
+  client?: string
+}
+
+export interface PingRpcTimelineSample {
+  sampleAt: number
+  apiVisibleAt: number
+  latency: number | null
+  loss: number
+  taskId: number
+  client: string
+}
+
+export interface PingRpcTimelineEntry {
+  method: string
+  requestAt: number
+  responseAt: number
+  params: Record<string, unknown>
+  /** The real scheduled samples contained in this RPC response. */
+  responseSamples: PingRpcTimelineSample[]
 }
 
 export interface KomariFixtureController {
@@ -61,6 +98,9 @@ export interface KomariFixtureController {
   getThemeSaveCount: () => number
   pausePingResponses: () => () => void
   advanceTime: (milliseconds: number) => Promise<void>
+  /** In-memory only; no HAR, storage state, or browser profile is produced. */
+  timeline: PingRpcTimelineEntry[]
+  now: () => number
 }
 
 interface FixturePingTask {
@@ -77,6 +117,10 @@ interface FixturePingTask {
 interface PingResponseGate {
   pause: () => () => void
   wait: () => Promise<void>
+}
+
+interface ResolvedScheduledPingSample extends PingRpcTimelineSample {
+  time: string
 }
 
 function uuidFor(index: number): string {
@@ -107,6 +151,56 @@ function createPingResponseGate(): PingResponseGate {
       await pending
     },
   }
+}
+
+/**
+ * `page.clock.fastForward()` runs browser timers synchronously, while routed
+ * RPC responses complete over the Playwright protocol afterwards. Yield both
+ * event loops between deterministic clock ticks so a request scheduled at one
+ * retry boundary can settle before the next boundary is evaluated.
+ */
+async function settleFakeClockWork(page: Page): Promise<void> {
+  await Promise.resolve()
+  await new Promise<void>(resolve => setTimeout(resolve, 0))
+  await page.evaluate(async () => {
+    await Promise.resolve()
+  })
+  await new Promise<void>(resolve => setTimeout(resolve, 0))
+}
+
+function parseFixtureTimestamp(value: string | number, label: string): number {
+  const raw = typeof value === 'number'
+    ? (Math.abs(value) < 10_000_000_000 ? value * 1000 : value)
+    : Date.parse(value)
+  if (!Number.isFinite(raw))
+    throw new Error(`Invalid Ping fixture ${label}: ${String(value)}`)
+  return raw
+}
+
+function resolveScheduledPingSamples(
+  fixture: NodeCardPingFixture,
+  uuid: string,
+  now: number,
+): ResolvedScheduledPingSample[] | null {
+  if (!fixture.sampleSchedule?.length)
+    return null
+
+  return fixture.sampleSchedule
+    .map((sample) => {
+      const sampleAt = parseFixtureTimestamp(sample.sampleAt, 'sampleAt')
+      const apiVisibleAt = parseFixtureTimestamp(sample.apiVisibleAt, 'apiVisibleAt')
+      return {
+        sampleAt,
+        apiVisibleAt,
+        latency: sample.latency,
+        loss: sample.loss,
+        taskId: sample.taskId ?? 202,
+        client: sample.client ?? uuid,
+        time: new Date(sampleAt).toISOString(),
+      }
+    })
+    .filter(sample => sample.client === uuid && sample.apiVisibleAt <= now)
+    .sort((left, right) => left.sampleAt - right.sampleAt)
 }
 
 function allFixtureNodeUuids(): string[] {
@@ -187,7 +281,21 @@ function buildNodeCardPingSamplePoints(fixture: NodeCardPingFixture): Array<{ ti
   })
 }
 
-function buildNodeCardPingRecords(uuid: string, fixture: NodeCardPingFixture): Array<{ task_id: number, client: string, time: string | number, value: number }> {
+function buildNodeCardPingRecords(
+  uuid: string,
+  fixture: NodeCardPingFixture,
+  now: number,
+): Array<{ task_id: number, client: string, time: string | number, value: number }> {
+  const scheduledSamples = resolveScheduledPingSamples(fixture, uuid, now)
+  if (scheduledSamples) {
+    return scheduledSamples.map(sample => ({
+      task_id: sample.taskId,
+      client: sample.client,
+      time: sample.time,
+      value: sample.latency ?? -1,
+    }))
+  }
+
   const points = buildNodeCardPingSamplePoints(fixture)
   const records = points.map(point => ({ task_id: 101, client: uuid, time: point.time, value: 10 }))
   if (fixture.legacy === 'selected-empty' || fixture.legacyEmptyUuids?.includes(uuid))
@@ -207,16 +315,39 @@ function buildNodeCardPingRecords(uuid: string, fixture: NodeCardPingFixture): A
   ]
 }
 
-function buildNodeCardPingMetricResponse(payload: Record<string, unknown>, fixture: NodeCardPingFixture) {
+function buildNodeCardPingMetricResponse(
+  payload: Record<string, unknown>,
+  fixture: NodeCardPingFixture,
+  now: number,
+) {
   const requested = Array.isArray(payload.metric_keys) ? payload.metric_keys.map(String) : ['ping.latency_ms', 'ping.loss']
   const uuid = typeof payload.entity_id === 'string' ? payload.entity_id : uuidFor(0)
   const taskIds = getFixturePingTaskIds(payload, fixture, fixture.metricQueryOmitTaskIds)
+  const scheduledSamples = resolveScheduledPingSamples(fixture, uuid, now)
   const points = buildNodeCardPingSamplePoints(fixture)
   const series = requested.flatMap((metricKey) => {
     if (metricKey !== 'ping.latency_ms' && metricKey !== 'ping.loss')
       return []
 
     return taskIds.map((taskId) => {
+      if (scheduledSamples) {
+        const taskSamples = scheduledSamples.filter(sample => sample.taskId === taskId)
+        return {
+          metric_key: metricKey,
+          entity_id: uuid,
+          type: 'gauge',
+          tags: fixture.komari141HarShape
+            ? { task_id: String(taskId) }
+            : { task_id: String(taskId), task_name: taskId === 202 ? 'Fixture Hong Kong' : 'Fixture Tokyo' },
+          points: taskSamples.map(sample => ({
+            time: sample.time,
+            value: metricKey === 'ping.loss' ? sample.loss / 100 : sample.latency,
+            count: 1,
+            ...(fixture.komari141HarShape ? { tags: { task_id: String(taskId) } } : {}),
+          })),
+        }
+      }
+
       const latency = taskId === 202
         ? fixture.task202Latency === undefined ? 200 : fixture.task202Latency
         : 10
@@ -237,12 +368,55 @@ function buildNodeCardPingMetricResponse(payload: Record<string, unknown>, fixtu
       }
     })
   })
-  return { start: String(points[0]?.time ?? FIXED_NOW), end: String(points.at(-1)?.time ?? FIXED_NOW), series, count: series.length }
+  const scheduledStart = scheduledSamples?.[0]?.time
+  const scheduledEnd = scheduledSamples?.at(-1)?.time
+  return {
+    start: String(scheduledStart ?? points[0]?.time ?? FIXED_NOW),
+    end: String(scheduledEnd ?? points.at(-1)?.time ?? FIXED_NOW),
+    series,
+    count: series.length,
+  }
 }
 
-function buildNodeCardPingMetricStats(payload: Record<string, unknown>, fixture: NodeCardPingFixture) {
+function buildNodeCardPingMetricStats(
+  payload: Record<string, unknown>,
+  fixture: NodeCardPingFixture,
+  now: number,
+) {
   const uuid = typeof payload.entity_id === 'string' ? payload.entity_id : uuidFor(0)
   const taskIds = getFixturePingTaskIds(payload, fixture)
+  const scheduledSamples = resolveScheduledPingSamples(fixture, uuid, now)
+  if (scheduledSamples) {
+    const stats = taskIds.flatMap((taskId) => {
+      const taskSamples = scheduledSamples.filter(sample => sample.taskId === taskId)
+      if (!taskSamples.length)
+        return []
+
+      const latencySamples = taskSamples.filter((sample): sample is ResolvedScheduledPingSample & { latency: number } => sample.latency !== null)
+      const avg = latencySamples.length
+        ? latencySamples.reduce((total, sample) => total + sample.latency, 0) / latencySamples.length
+        : undefined
+      const latest = latencySamples.at(-1)?.latency
+      const loss = taskSamples.reduce((total, sample) => total + sample.loss, 0) / taskSamples.length
+      return [{
+        entity_id: uuid,
+        task_id: String(taskId),
+        name: taskId === 202 ? 'Fixture Hong Kong' : 'Fixture Tokyo',
+        tags: { task_id: String(taskId) },
+        interval: 60,
+        total: taskSamples.length,
+        valid: latencySamples.length,
+        avg,
+        latest,
+        loss,
+        ...(fixture.komari141HarShape ? {} : { loss_approximate: false }),
+      }]
+    })
+    const start = scheduledSamples[0]?.time ?? FIXED_NOW
+    const end = scheduledSamples.at(-1)?.time ?? FIXED_NOW
+    return { start, end, interval_seconds: 60, stats, count: stats.length }
+  }
+
   const sampleCount = fixture.sampleTimes?.length ?? Math.max(1, Math.floor(fixture.sampleCount ?? 4))
   const stats = taskIds.map((taskId) => {
     const latency = taskId === 202
@@ -477,27 +651,61 @@ function shouldFailPingMetric(params: Record<string, unknown> | undefined, fixtu
   return fixture.metric === 'error' || fixture.metricErrorUuids?.includes(pingRequestUuid(params)) === true
 }
 
+function shouldFailTaggedPingMetricQuery(params: Record<string, unknown> | undefined, fixture: NodeCardPingFixture): boolean {
+  const taskId = Number((params?.tags as Record<string, unknown> | undefined)?.task_id)
+  return Number.isSafeInteger(taskId) && fixture.metricErrorWhenTaggedTaskIds?.includes(taskId) === true
+}
+
+function shouldFailPingLegacy(params: Record<string, unknown> | undefined, fixture: NodeCardPingFixture): boolean {
+  return fixture.legacy === 'error' || fixture.legacyErrorUuids?.includes(pingRequestUuid(params)) === true
+}
+
+function getPingResponseSamples(
+  payload: { method: string, params?: Record<string, unknown> },
+  fixture: NodeCardPingFixture | undefined,
+  now: number,
+): PingRpcTimelineSample[] {
+  if (!fixture || payload.method === 'public:getPublicPingTasks')
+    return []
+
+  const scheduledSamples = resolveScheduledPingSamples(fixture, pingRequestUuid(payload.params), now)
+  if (!scheduledSamples)
+    return []
+
+  const requestedTaskIds = isPingMetricRequest(payload.method, payload.params)
+    ? getFixturePingTaskIds(payload.params ?? {}, fixture, payload.method === 'public:queryMetrics' ? fixture.metricQueryOmitTaskIds : [])
+    : null
+  return scheduledSamples
+    .filter(sample => requestedTaskIds === null || requestedTaskIds.includes(sample.taskId))
+    .map(({ time: _time, ...sample }) => sample)
+}
+
 async function handleRpc(
   route: Route,
   clientFixtures = clients,
   nodeCardPingFixture?: NodeCardPingFixture,
   pingResponseGate?: PingResponseGate,
   missingCpuMetricHistory = false,
+  getNow: () => Promise<number> = async () => Date.now(),
+  pingTimeline: PingRpcTimelineEntry[] = [],
 ): Promise<void> {
   const payload = route.request().postDataJSON() as { id: unknown, method: string, params?: Record<string, unknown> }
   const uuid = typeof payload.params?.uuid === 'string' ? payload.params.uuid : uuidFor(0)
-  const pingRecords = nodeCardPingFixture
-    ? buildNodeCardPingRecords(uuid, nodeCardPingFixture)
-    : Array.from({ length: 48 }, (_, index) => ({ task_id: 1, client: uuid, time: new Date(Date.parse(FIXED_NOW) - (47 - index) * 75_000).toISOString(), value: index % 17 === 0 ? -1 : 76 + index }))
-  const pingTasks = nodeCardPingFixture
-    ? buildNodeCardPingTasks(nodeCardPingFixture)
-    : [{ id: 1, name: 'Tokyo', interval: 60, loss: 3.2, weight: 1 }]
   const isPingRequest = payload.method === 'public:getPublicPingTasks'
     || (payload.method === 'common:getRecords' && payload.params?.type === 'ping')
     || payload.method === 'public:getPingRecords'
     || isPingMetricRequest(payload.method, payload.params)
+  const requestAt = isPingRequest ? await getNow() : 0
   if (isPingRequest)
     await pingResponseGate?.wait()
+
+  const responseAt = isPingRequest ? await getNow() : requestAt
+  const pingRecords = nodeCardPingFixture
+    ? buildNodeCardPingRecords(uuid, nodeCardPingFixture, responseAt)
+    : Array.from({ length: 48 }, (_, index) => ({ task_id: 1, client: uuid, time: new Date(Date.parse(FIXED_NOW) - (47 - index) * 75_000).toISOString(), value: index % 17 === 0 ? -1 : 76 + index }))
+  const pingTasks = nodeCardPingFixture
+    ? buildNodeCardPingTasks(nodeCardPingFixture)
+    : [{ id: 1, name: 'Tokyo', interval: 60, loss: 3.2, weight: 1 }]
 
   let result: unknown
   let error: { code: number, message: string } | null = null
@@ -516,9 +724,14 @@ async function handleRpc(
       result = { count: 48, records: buildRecords(uuid) }
       break
     case 'common:getRecords':
-      result = payload.params?.type === 'ping'
-        ? { count: 48, records: pingRecords, tasks: pingTasks }
-        : { count: 48, records: buildRecords(uuid) }
+      if (payload.params?.type === 'ping' && nodeCardPingFixture && shouldFailPingLegacy(payload.params, nodeCardPingFixture)) {
+        error = { code: -32601, message: 'Fixture ping legacy records unavailable' }
+      }
+      else {
+        result = payload.params?.type === 'ping'
+          ? { count: 48, records: pingRecords, tasks: pingTasks }
+          : { count: 48, records: buildRecords(uuid) }
+      }
       break
     case 'public:getClientRecentRecords':
       result = buildRecords(uuid)
@@ -527,7 +740,10 @@ async function handleRpc(
       result = { count: 48, records: buildRecords(uuid), load_type: 'all', has_gpu_data: false }
       break
     case 'public:getPingRecords':
-      result = { count: 48, records: pingRecords, tasks: pingTasks }
+      if (nodeCardPingFixture && shouldFailPingLegacy(payload.params, nodeCardPingFixture))
+        error = { code: -32601, message: 'Fixture public ping legacy records unavailable' }
+      else
+        result = { count: 48, records: pingRecords, tasks: pingTasks }
       break
     case 'public:getPublicPingTasks':
       result = pingTasks
@@ -537,7 +753,8 @@ async function handleRpc(
       break
     case 'public:queryMetrics':
       if (nodeCardPingFixture && isPingMetricRequest(payload.method, payload.params)) {
-        if (shouldFailPingMetric(payload.params, nodeCardPingFixture)) {
+        if (shouldFailPingMetric(payload.params, nodeCardPingFixture)
+          || shouldFailTaggedPingMetricQuery(payload.params, nodeCardPingFixture)) {
           error = { code: -32601, message: 'Fixture ping metrics unavailable' }
         }
         else if (nodeCardPingFixture.metric === 'malformed') {
@@ -549,7 +766,7 @@ async function handleRpc(
           }
         }
         else {
-          result = buildNodeCardPingMetricResponse(payload.params ?? {}, nodeCardPingFixture)
+          result = buildNodeCardPingMetricResponse(payload.params ?? {}, nodeCardPingFixture, responseAt)
         }
       }
       else {
@@ -571,7 +788,7 @@ async function handleRpc(
       }
       else {
         result = nodeCardPingFixture
-          ? buildNodeCardPingMetricStats(payload.params ?? {}, nodeCardPingFixture)
+          ? buildNodeCardPingMetricStats(payload.params ?? {}, nodeCardPingFixture, responseAt)
           : { start: FIXED_NOW, end: FIXED_NOW, interval_seconds: 60, stats: [], count: 0 }
       }
       break
@@ -590,6 +807,20 @@ async function handleRpc(
       result = null
   }
 
+  const responseSamples = isPingRequest && !error
+    ? getPingResponseSamples(payload, nodeCardPingFixture, responseAt)
+    : []
+
+  if (isPingRequest) {
+    pingTimeline.push({
+      method: payload.method,
+      requestAt,
+      responseAt,
+      params: { ...(payload.params ?? {}) },
+      responseSamples,
+    })
+  }
+
   await route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify(error ? jsonRpcError(payload.id, error.code, error.message) : jsonRpcResult(payload.id, result)),
@@ -601,6 +832,19 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     ? buildClients(options.freePriceNode, options.expiryThresholds, options.invalidExpiry)
     : clients
   const pingResponseGate = createPingResponseGate()
+  const pingTimeline: PingRpcTimelineEntry[] = []
+  let currentNow = parseFixtureTimestamp(options.clockNow ?? FIXED_NOW, 'clockNow')
+  const readBrowserNow = async (): Promise<number> => {
+    try {
+      const browserNow = await page.evaluate(() => Date.now())
+      if (Number.isFinite(browserNow))
+        currentNow = browserNow
+    }
+    catch {
+      // A route can outlive page teardown; retain the last deterministic clock.
+    }
+    return currentNow
+  }
   let nodeCardPingFixture = options.nodeCardPingFixture
   const adminAccess = options.adminAccess ?? 'guest'
   let siteName = options.siteName ?? 'Komari Visual Lab'
@@ -700,6 +944,8 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     nodeCardPingFixture,
     pingResponseGate,
     options.missingCpuMetricHistory ?? false,
+    readBrowserNow,
+    pingTimeline,
   ))
   await page.route('**/api/admin/ping', async (route) => {
     if (adminAccess !== 'admin') {
@@ -762,12 +1008,31 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     getSavedThemeSettings: () => ({ ...settings }),
     getThemeSaveCount: () => themeSaveCount,
     pausePingResponses: () => pingResponseGate.pause(),
-    advanceTime: milliseconds => options.fakeTimers
-      ? page.clock.fastForward(milliseconds)
-      : page.evaluate((delta) => {
+    advanceTime: async (milliseconds) => {
+      if (options.fakeTimers) {
+        // Step fake time at the scheduler's one-second cadence. A single large
+        // jump otherwise makes a 5/10/20s retry chain appear as one request,
+        // because each async routed RPC only resumes after the whole jump.
+        let remaining = milliseconds
+        while (remaining > 0) {
+          const step = Math.min(1_000, remaining)
+          await page.clock.fastForward(step)
+          currentNow += step
+          await settleFakeClockWork(page)
+          remaining -= step
+        }
+      }
+      else {
+        await page.evaluate((delta) => {
           const advance = (window as typeof window & { __advanceKomariFixtureTime?: (value: number) => void })
             .__advanceKomariFixtureTime
           advance?.(delta)
-        }, milliseconds),
+        }, milliseconds)
+        currentNow += milliseconds
+      }
+      await readBrowserNow()
+    },
+    timeline: pingTimeline,
+    now: () => currentNow,
   }
 }

@@ -37,7 +37,7 @@
 
 | 项目     | 说明                                                      |
 | :------- | :-------------------------------------------------------- |
-| 当前版本 | **v1.3.2**                                                |
+| 当前版本 | **v1.3.3**                                                |
 | 主题定位 | Komari Monitor 可导入 zip 主题，不是普通 Web App 部署包   |
 | 视觉风格 | 毛玻璃卡片、动态背景、浅色 / 深色 / 北京时间自动日夜模式  |
 | 数据能力 | Metric Store 优先，旧接口自动 fallback，兼容 Komari 1.2.x |
@@ -485,13 +485,24 @@ preview.png
 dist/
 ```
 
-> Komari 后台显示的主题版本以 [`komari-theme.json`](komari-theme.json) 顶层 `version` 为准；`package.json` 的 `1.3.2` 仅用于 Node/Bun 工具元数据。
+> Komari 后台显示的主题版本以 [`komari-theme.json`](komari-theme.json) 顶层 `version` 为准；`package.json` 的 `1.3.3` 仅用于 Node/Bun 工具元数据。
 
-生成 ZIP 后，`bun run release:prepare` 会先验证 ZIP 根目录 metadata 的版本，再创建含 `dist/` 的 `<source-parent>/<version>/Glassmorphism-Plus-release-<version>/` 完整 source snapshot。它不会创建 publish clone。发布前应另行在 `<source-parent>/<version>/Glassmorphism-Plus-publish-<version>/` clone 已核准的 GitHub target，保留其 `.git` 历史，再将审核通过的 source 同步进去。安装 ZIP 最终由维护者手动上传到 GitHub Release Assets。
+生成 ZIP 后，`bun run release:prepare` 会先验证 ZIP 根目录 metadata 的版本，再创建含 `dist/` 的 `<source-parent>/<version>/Glassmorphism-Plus-release-<version>/` 完整 source snapshot。它不会创建 publish clone。发布前应另行在 `<source-parent>/<version>/Glassmorphism-Plus-publish-<version>/` clone 已核准的 GitHub target，保留其 `.git` 历史，再将审核通过的 source 同步进去。最终客户安装 ZIP 只保留在本地；除非用户在该次任务明确授权，不会上传到 GitHub Release Assets。
 
 ---
 
 ## 📝 更新日志
+
+<details open>
+<summary><strong>v1.3.3 · Ping 最新时间桶可靠性修复</strong></summary>
+
+- 首页 Ping 历史明确区分等待写入的 `PENDING`、真实 `DATA` 与经过有限 deadline 后的 `CONFIRMED_MISSING`；新的采样周期不再过早显示“无采样数据”。
+- 冷启动、Metric/Legacy 传输失败与当前开放时间桶会保留 pending；只有成功的空查询在 sample 写入宽限期及 5/10/20 秒有限重试后才能确认 missing。
+- 保留真实空桶，并允许迟到的后端样本将 `CONFIRMED_MISSING` 回填为 `DATA`；不插值、不复用旧值、不伪造时间戳或 Ping 数值。
+- Detail 与 NodeCard 共享同 UUID、同时间窗的短期原始 Metric 结果；Detail 取得的真实 latency/loss 点可以安全补给失败中的绑定 NodeCard 查询。
+- Detail Ping 图表保留原始 timestamp 与 null gap，禁用峰值平滑和曲线插值；真实 100% 丢包显示为“延迟不可用”，而非“无采样”。
+
+</details>
 
 <details open>
 <summary><strong>v3.3.3 · 免费节点文案修复</strong></summary>

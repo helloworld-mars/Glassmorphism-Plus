@@ -331,7 +331,7 @@ function main(): void {
   console.log(`[release:prepare] Verified installer ZIP: ${releasePaths.installerPath}`)
   console.log(`[release:prepare] Created release snapshot: ${releasePaths.releaseDirectory}`)
   console.log(`[release:prepare] Publish snapshot path reserved: ${releasePaths.publishDirectory}`)
-  console.log('[release:prepare] Git staging and GitHub Release asset uploads remain manual.')
+  console.log('[release:prepare] Git staging remains manual; final installer ZIP uploads require explicit user authorization.')
 }
 
 try {

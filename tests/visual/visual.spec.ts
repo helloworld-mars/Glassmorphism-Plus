@@ -56,6 +56,32 @@ async function expectNodeCardPingTooltip(page: Page, metric: 'latency' | 'loss',
   await expect.poll(async () => (await tooltips.allTextContents()).some(content => content.includes(text))).toBe(true)
 }
 
+function nodeCardPingBucket(page: Page, metric: 'latency' | 'loss', time: string): Locator {
+  return primaryNodeCard(page)
+    .locator(`[data-node-ping-bars="${metric}"] [data-node-ping-bucket-time="${time}"]`)
+}
+
+async function expectNodeCardPingBucketState(
+  page: Page,
+  metric: 'latency' | 'loss',
+  time: string,
+  state: 'pending' | 'data' | 'confirmed-missing',
+): Promise<void> {
+  await expect(nodeCardPingBucket(page, metric, time)).toHaveAttribute('data-node-ping-state', state)
+}
+
+async function expectAllNodeCardPingBucketStates(
+  page: Page,
+  metric: 'latency' | 'loss',
+  state: 'pending' | 'data' | 'confirmed-missing',
+): Promise<void> {
+  const bars = primaryNodeCard(page).locator(`[data-node-ping-bars="${metric}"] [data-node-ping-bar]`)
+  await expect(bars).toHaveCount(20)
+  await expect.poll(async () => bars.evaluateAll((elements, expectedState) => elements.every((element) => {
+    return element.getAttribute('data-node-ping-state') === expectedState
+  }), state)).toBe(true)
+}
+
 async function readNodeCardPingBarGeometry(card: Locator, metric: 'latency' | 'loss') {
   return card.locator(`[data-node-ping-bars="${metric}"]`).evaluate((element) => {
     const strip = element.getBoundingClientRect()
@@ -183,13 +209,13 @@ test('brand metadata and homepage footer retain current and original attribution
     name: 'Komari Glassmorphism Plus',
     short: 'glassmorphism-plus',
     description: 'A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.',
-    version: '1.3.2',
+    version: '1.3.3',
     author: 'helloworld-mars',
     url: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(packageMetadata).toMatchObject({
     name: 'komari-theme-glassmorphism-plus',
-    version: '1.3.2',
+    version: '1.3.3',
     homepage: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(themeManifest.short).toMatch(/^[\w-]+$/)
@@ -219,7 +245,7 @@ test('brand metadata and homepage footer retain current and original attribution
 
   const footer = page.locator('footer')
   await expect(footer.getByRole('link', { name: 'Glassmorphism Plus' })).toHaveAttribute('href', 'https://github.com/helloworld-mars/Glassmorphism-Plus')
-  await expect(footer.getByText('v1.3.2 · helloworld-mars', { exact: true }).first()).toBeVisible()
+  await expect(footer.getByText('v1.3.3 · helloworld-mars', { exact: true }).first()).toBeVisible()
   await expect(footer.getByRole('link', { name: 'Based on the original theme by sanrokamlan' }))
     .toHaveAttribute('href', 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism')
   await expect(footer).not.toContainText('unknown')
@@ -507,6 +533,45 @@ function allNodeBindings(taskId: number): string {
       taskId,
     ]),
   ))
+}
+
+const PING_INGESTION_CLOCK = '2026-07-25T12:00:00.000+08:00'
+const PING_INGESTION_BUCKET = '2026-07-25T04:00:00.000Z'
+const PING_PREVIOUS_BUCKET = '2026-07-25T03:57:00.000Z'
+const PING_INGESTION_SAMPLE = '2026-07-25T12:00:00.000+08:00'
+const PING_ARBITRARY_PHASE_CLOCK = '2026-07-25T12:00:20.000+08:00'
+const PING_ARBITRARY_PHASE_PREVIOUS_SAMPLE = '2026-07-25T11:59:20.000+08:00'
+const PING_ARBITRARY_PHASE_SAMPLE = '2026-07-25T12:00:22.000+08:00'
+const PING_ARBITRARY_PHASE_API_VISIBLE = '2026-07-25T12:00:34.000+08:00'
+
+function scheduledPingSamples(apiVisibleAt: string, latency = 9, previousLatency = 7) {
+  return [
+    {
+      sampleAt: '2026-07-25T11:59:00.000+08:00',
+      apiVisibleAt: '2026-07-25T11:59:00.000+08:00',
+      latency: previousLatency,
+      loss: 0,
+    },
+    {
+      sampleAt: PING_INGESTION_SAMPLE,
+      apiVisibleAt,
+      latency,
+      loss: 0,
+    },
+  ]
+}
+
+function selectedPingMetricTimelineEntries(timeline: ReadonlyArray<{
+  method: string
+  requestAt: number
+  responseAt: number
+  params: Record<string, unknown>
+  responseSamples: ReadonlyArray<{ sampleAt: number }>
+}>) {
+  return timeline.filter((entry) => {
+    const taskId = (entry.params.tags as Record<string, unknown> | undefined)?.task_id
+    return entry.method === 'public:queryMetrics' && taskId === '202'
+  })
 }
 
 function isPingMetricQuery(params: Record<string, unknown>): boolean {
@@ -799,7 +864,7 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page)
     await expectNodeCardPing(page, '7 ms', '0.0%')
-    await expectNodeCardPingTooltip(page, 'latency', '23:00:00\n7 ms')
+    await expectNodeCardPingTooltip(page, 'latency', '23:02:00\n7 ms')
 
     const selectedQueries = () => calls.filter(call => call.method === 'public:queryMetrics'
       && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202')
@@ -808,7 +873,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await fixture.advanceTime(10_000)
     await expect.poll(() => selectedQueries().length).toBe(2)
     await expectNodeCardPing(page, '7 ms', '0.0%')
-    await expectNodeCardPingTooltip(page, 'latency', '23:00:00\n7 ms')
+    await expectNodeCardPingTooltip(page, 'latency', '23:02:00\n7 ms')
     expect((await primaryNodeCard(page).locator('[data-node-ping-bars="latency"] [role="tooltip"]').allTextContents())
       .some(text => text.includes('23:03:00') && text.includes('无采样数据'))).toBe(false)
 
@@ -827,6 +892,588 @@ test.describe('node-card per-node ping task bindings', () => {
     await expect.poll(() => selectedQueries().length).toBe(4)
     await expectNodeCardPing(page, '9 ms', '0.0%')
     await expectNodeCardPingTooltip(page, 'latency', '23:03:00\n9 ms')
+  })
+
+  test('v1.3.3 keeps a cold newest bucket PENDING until its real API sample becomes visible, then renders DATA without reload', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    const fixture = await installKomariFixture(page, {
+      fakeTimers: true,
+      clockNow: PING_INGESTION_CLOCK,
+      nodeCardPingTaskBindings: primaryBinding(202),
+      nodeCardPingFixture: {
+        metric: 'valid',
+        sampleSchedule: scheduledPingSamples('2026-07-25T12:00:10.000+08:00'),
+      },
+    })
+    await openStablePage(page)
+
+    for (const metric of ['latency', 'loss'] as const)
+      await expectNodeCardPingBucketState(page, metric, PING_INGESTION_BUCKET, 'pending')
+    await expectNodeCardPingBucketState(page, 'latency', PING_PREVIOUS_BUCKET, 'data')
+    await expectNodeCardPingTooltip(page, 'latency', '11:59:00\n7 ms')
+    expect(selectedPingMetricTimelineEntries(fixture.timeline)
+      .some(entry => entry.responseSamples.some(sample => sample.sampleAt === Date.parse(PING_INGESTION_SAMPLE)))).toBe(false)
+
+    const beforeRefreshUrl = page.url()
+    // 12:00:05 reads the still-pending backend, then the bounded retry at
+    // 12:00:10 can see the true sample. No reload or route change is allowed.
+    await fixture.advanceTime(10_000)
+    for (const metric of ['latency', 'loss'] as const)
+      await expectNodeCardPingBucketState(page, metric, PING_INGESTION_BUCKET, 'data')
+    await expectNodeCardPingTooltip(page, 'latency', '12:00:00\n9 ms')
+    await expectNodeCardPingTooltip(page, 'loss', '12:00:00\n0.0%')
+    await expect(page).toHaveURL(beforeRefreshUrl)
+
+    const firstApiVisibility = selectedPingMetricTimelineEntries(fixture.timeline).find((entry) => {
+      return entry.responseSamples.some(sample => sample.sampleAt === Date.parse(PING_INGESTION_SAMPLE))
+    })
+    expect(firstApiVisibility).toBeDefined()
+    expect(firstApiVisibility!.responseAt).toBeGreaterThanOrEqual(Date.parse('2026-07-25T12:00:10.000+08:00'))
+    expect(firstApiVisibility!.requestAt).toBeLessThanOrEqual(firstApiVisibility!.responseAt)
+  })
+
+  test('v1.3.3 preserves an arbitrary probe phase instead of assuming minute or bucket-start samples', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    const fixture = await installKomariFixture(page, {
+      fakeTimers: true,
+      clockNow: PING_ARBITRARY_PHASE_CLOCK,
+      nodeCardPingTaskBindings: primaryBinding(202),
+      nodeCardPingFixture: {
+        metric: 'valid',
+        sampleSchedule: [
+          {
+            sampleAt: PING_ARBITRARY_PHASE_PREVIOUS_SAMPLE,
+            apiVisibleAt: PING_ARBITRARY_PHASE_PREVIOUS_SAMPLE,
+            latency: 7,
+            loss: 0,
+          },
+          {
+            sampleAt: PING_ARBITRARY_PHASE_SAMPLE,
+            apiVisibleAt: PING_ARBITRARY_PHASE_API_VISIBLE,
+            latency: 13,
+            loss: 0,
+          },
+        ],
+      },
+    })
+    await openStablePage(page)
+
+    await expectNodeCardPingBucketState(page, 'latency', PING_PREVIOUS_BUCKET, 'data')
+    await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'pending')
+    await expectNodeCardPingTooltip(page, 'latency', '11:59:20\n7 ms')
+    expect(selectedPingMetricTimelineEntries(fixture.timeline).every(entry => entry.responseSamples
+      .every(sample => sample.sampleAt !== Date.parse(PING_ARBITRARY_PHASE_SAMPLE)))).toBe(true)
+
+    // The backend does not expose the :22 sample until :34. The next bounded
+    // retry sees the same raw timestamp; no logic may rewrite it to :00.
+    await fixture.advanceTime(14_000)
+    await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'pending')
+    await fixture.advanceTime(6_000)
+    await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'data')
+    await expectNodeCardPingTooltip(page, 'latency', '12:00:22\n13 ms')
+
+    const rawSampleResponse = selectedPingMetricTimelineEntries(fixture.timeline).find(entry => entry.responseSamples
+      .some(sample => sample.sampleAt === Date.parse(PING_ARBITRARY_PHASE_SAMPLE)))
+    expect(rawSampleResponse).toBeDefined()
+    expect(rawSampleResponse!.responseAt).toBeGreaterThanOrEqual(Date.parse(PING_ARBITRARY_PHASE_API_VISIBLE))
+    expect(rawSampleResponse!.responseSamples.some((sample) => {
+      return sample.sampleAt === Date.parse(PING_ARBITRARY_PHASE_SAMPLE)
+        && sample.latency === 13
+        && sample.loss === 0
+    })).toBe(true)
+  })
+
+  test('v1.3.3 keeps cold Metric and Legacy transport failures PENDING with an error tooltip', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    const fixture = await installKomariFixture(page, {
+      fakeTimers: true,
+      clockNow: PING_INGESTION_CLOCK,
+      nodeCardPingTaskBindings: primaryBinding(202),
+      nodeCardPingFixture: {
+        metric: 'error',
+        legacy: 'error',
+      },
+    })
+    await openStablePage(page)
+
+    await expectNodeCardPing(page, '-', '-')
+    for (const metric of ['latency', 'loss'] as const)
+      await expectAllNodeCardPingBucketStates(page, metric, 'pending')
+    await expectNodeCardPingTooltip(page, 'latency', '加载失败')
+    await expectNodeCardPingTooltip(page, 'loss', '加载失败')
+
+    await fixture.advanceTime(120_000)
+    for (const metric of ['latency', 'loss'] as const)
+      await expectAllNodeCardPingBucketStates(page, metric, 'pending')
+    expect(fixture.timeline.some(entry => entry.method === 'public:queryMetrics')).toBe(true)
+    expect(fixture.timeline.some(entry => entry.method === 'common:getRecords' || entry.method === 'public:getPingRecords')).toBe(true)
+    expect(fixture.timeline.every(entry => entry.responseSamples.length === 0)).toBe(true)
+  })
+
+  test('v1.3.3 treats an observed 100% loss probe as latency DATA, never as no-sample', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    await installKomariFixture(page, {
+      fakeTimers: true,
+      clockNow: PING_INGESTION_CLOCK,
+      nodeCardPingTaskBindings: primaryBinding(202),
+      nodeCardPingFixture: {
+        metric: 'valid',
+        sampleSchedule: [
+          {
+            sampleAt: '2026-07-25T11:59:00.000+08:00',
+            apiVisibleAt: '2026-07-25T11:59:00.000+08:00',
+            latency: 7,
+            loss: 0,
+          },
+          {
+            sampleAt: PING_INGESTION_SAMPLE,
+            apiVisibleAt: PING_INGESTION_CLOCK,
+            latency: null,
+            loss: 100,
+          },
+        ],
+      },
+    })
+    await openStablePage(page)
+
+    await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'data')
+    await expectNodeCardPingBucketState(page, 'loss', PING_INGESTION_BUCKET, 'data')
+    await expectNodeCardPingTooltip(page, 'latency', '12:00:00\n延迟不可用（100% 丢包）')
+    await expectNodeCardPingTooltip(page, 'loss', '12:00:00\n100.0%')
+    const latencyTooltipContents = await primaryNodeCard(page)
+      .locator('[data-node-ping-bars="latency"] [role="tooltip"]')
+      .allTextContents()
+    expect(latencyTooltipContents.some(text => text.includes('12:00:00') && text.includes('无采样数据'))).toBe(false)
+  })
+
+  test('v1.3.3 renders the raw Detail sample in UI and agrees with NodeCard after a finite retry', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    const fixture = await installKomariFixture(page, {
+      fakeTimers: true,
+      clockNow: PING_INGESTION_CLOCK,
+      nodeCardPingTaskBindings: primaryBinding(202),
+      nodeCardPingFixture: {
+        metric: 'valid',
+        sampleSchedule: scheduledPingSamples('2026-07-25T12:00:05.000+08:00', 13),
+      },
+    })
+    await openStablePage(page)
+    await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'pending')
+
+    await fixture.advanceTime(5_000)
+    const apiVisible = fixture.timeline.find((entry) => {
+      return entry.responseSamples.some(sample => sample.sampleAt === Date.parse(PING_INGESTION_SAMPLE))
+    })
+    expect(apiVisible).toBeDefined()
+
+    // Detail requests its independent unfiltered Metric payload. Check the
+    // rendered task card and chart, not only the fixture RPC timeline.
+    await primaryNodeCard(page).click()
+    await expect(page).toHaveURL(`/instance/${PRIMARY_NODE_UUID}`)
+    await expect(page.getByText('硬件信息')).toBeVisible()
+    const detailTaskCard = page.getByText('Fixture Hong Kong', { exact: true })
+      .locator('xpath=ancestor::div[contains(@class, "cursor-pointer")][1]')
+    await expect(detailTaskCard).toBeVisible()
+    await detailTaskCard.getByRole('button').hover()
+    await expect(page.locator('[role="tooltip"]').filter({ hasText: '13 ms' }).last()).toBeVisible()
+    const detailPingRoot = detailTaskCard.locator('xpath=ancestor::div[contains(@class, "flex-col") and contains(@class, "gap-4")][1]')
+    const detailChart = detailPingRoot.locator('.echarts')
+    await expect(detailChart).toBeVisible()
+    await expect(detailChart.locator('canvas')).toBeVisible()
+    await expect.poll(() => fixture.timeline.some((entry) => {
+      const taskId = (entry.params.tags as Record<string, unknown> | undefined)?.task_id
+      return entry.method === 'public:queryMetrics'
+        && taskId === undefined
+        && entry.responseSamples.some(sample => sample.sampleAt === Date.parse(PING_INGESTION_SAMPLE))
+    })).toBe(true)
+    const detailVisibleAt = fixture.now()
+
+    await fixture.advanceTime(1_000)
+    await page.goBack()
+    await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
+    await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'data')
+    await expectNodeCardPingTooltip(page, 'latency', '12:00:00\n13 ms')
+    const nodeCardVisibleAt = fixture.now()
+
+    expect(apiVisible!.responseAt).toBeGreaterThanOrEqual(Date.parse(PING_INGESTION_SAMPLE))
+    expect(detailVisibleAt).toBeGreaterThanOrEqual(apiVisible!.responseAt)
+    expect(nodeCardVisibleAt).toBeGreaterThanOrEqual(detailVisibleAt)
+  })
+
+  test('v1.3.3 bridges a Detail raw Metric window into a failed selected NodeCard query', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    const bridgeSample = '2026-07-25T12:00:02.000+08:00'
+    const bridgeVisibleAt = '2026-07-25T12:00:05.000+08:00'
+    const fixture = await installKomariFixture(page, {
+      fakeTimers: true,
+      clockNow: PING_INGESTION_CLOCK,
+      nodeCardPingTaskBindings: primaryBinding(202),
+      nodeCardPingFixture: {
+        metric: 'valid',
+        legacy: 'error',
+        metricErrorWhenTaggedTaskIds: [202],
+        sampleSchedule: [{
+          sampleAt: bridgeSample,
+          apiVisibleAt: bridgeVisibleAt,
+          latency: 17,
+          loss: 0,
+        }],
+      },
+    })
+
+    // NodeCard starts cold: its tagged raw query and legacy fallback fail, so
+    // it must remain pending rather than manufacture missing telemetry.
+    await openStablePage(page)
+    for (const metric of ['latency', 'loss'] as const)
+      await expectAllNodeCardPingBucketStates(page, metric, 'pending')
+    await expectNodeCardPingTooltip(page, 'latency', '加载失败')
+
+    // The backend makes the real :02 sample visible at :05. Detail's untagged
+    // paired Metric query can cache it even while tagged NodeCard queries fail.
+    await fixture.advanceTime(5_000)
+    await primaryNodeCard(page).click()
+    await expect(page).toHaveURL(`/instance/${PRIMARY_NODE_UUID}`)
+    const detailTaskCard = page.getByText('Fixture Hong Kong', { exact: true })
+      .locator('xpath=ancestor::div[contains(@class, "cursor-pointer")][1]')
+    await expect(detailTaskCard).toBeVisible()
+    await expect(detailTaskCard.locator('span[title="平均延迟"]')).toHaveText('17ms')
+    const findDetailRawQuery = () => {
+      return fixture.timeline.find((entry) => {
+        const tags = entry.params.tags as Record<string, unknown> | undefined
+        return entry.method === 'public:queryMetrics'
+          && tags?.task_id === undefined
+          && entry.responseSamples.some(sample => sample.sampleAt === Date.parse(bridgeSample) && sample.latency === 17)
+      })
+    }
+    await expect.poll(findDetailRawQuery).toBeDefined()
+    const detailRawQuery = findDetailRawQuery()
+    if (!detailRawQuery)
+      throw new Error('Detail did not populate the expected raw Ping Metric window')
+    const detailWindow = {
+      start: detailRawQuery.params.start,
+      end: detailRawQuery.params.end,
+    }
+
+    await page.goBack()
+    await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
+    await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'data')
+    await expectNodeCardPingTooltip(page, 'latency', '12:00:02\n17 ms')
+    await expectNodeCardPingBucketState(page, 'latency', PING_PREVIOUS_BUCKET, 'pending')
+    await expectNodeCardPingTooltip(page, 'latency', '加载失败')
+
+    const selectedFailures = () => selectedPingMetricTimelineEntries(fixture.timeline)
+    await expect.poll(() => selectedFailures().length).toBeGreaterThan(0)
+    expect(selectedFailures().every(entry => entry.responseSamples.length === 0)).toBe(true)
+    expect(selectedFailures().every((entry) => {
+      return entry.params.start === detailWindow.start && entry.params.end === detailWindow.end
+    })).toBe(true)
+
+    await fixture.advanceTime(45_000)
+    await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'data')
+    await expectNodeCardPingBucketState(page, 'latency', PING_PREVIOUS_BUCKET, 'pending')
+    const latencyStates = await primaryNodeCard(page)
+      .locator('[data-node-ping-bars="latency"] [data-node-ping-bar]')
+      .evaluateAll(elements => elements.map(element => element.getAttribute('data-node-ping-state')))
+    expect(latencyStates).not.toContain('confirmed-missing')
+  })
+
+  test('v1.3.3 turns a genuinely absent current bucket into CONFIRMED_MISSING only after its finite decision deadline', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    const fixture = await installKomariFixture(page, {
+      fakeTimers: true,
+      clockNow: PING_INGESTION_CLOCK,
+      nodeCardPingTaskBindings: primaryBinding(202),
+      nodeCardPingFixture: {
+        metric: 'valid',
+        sampleSchedule: scheduledPingSamples('2026-07-25T12:10:00.000+08:00'),
+      },
+    })
+    await openStablePage(page)
+    await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'pending')
+
+    // The previous real 11:59 sample expects the 12:00 sample. The decision
+    // deadline is its 5 s write grace plus the bounded 5/10/20 s retry budget.
+    for (const delay of [5_000, 5_000, 10_000, 20_000, 5_000])
+      await fixture.advanceTime(delay)
+
+    for (const metric of ['latency', 'loss'] as const)
+      await expectNodeCardPingBucketState(page, metric, PING_INGESTION_BUCKET, 'confirmed-missing')
+    await expectNodeCardPingTooltip(page, 'latency', '12:00:00\n无采样数据')
+    await fixture.advanceTime(10_000)
+    await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'confirmed-missing')
+
+    const selectedQueries = selectedPingMetricTimelineEntries(fixture.timeline)
+    expect(selectedQueries.length).toBeGreaterThanOrEqual(4)
+    expect(selectedQueries.length).toBeLessThanOrEqual(6)
+    expect(selectedQueries.every(entry => entry.responseSamples
+      .every(sample => sample.sampleAt !== Date.parse(PING_INGESTION_SAMPLE)))).toBe(true)
+  })
+
+  test('v1.3.3 backfills a late real sample from CONFIRMED_MISSING to DATA without inventing a value', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    const fixture = await installKomariFixture(page, {
+      fakeTimers: true,
+      clockNow: PING_INGESTION_CLOCK,
+      nodeCardPingTaskBindings: primaryBinding(202),
+      nodeCardPingFixture: {
+        metric: 'valid',
+        sampleSchedule: scheduledPingSamples('2026-07-25T12:00:50.000+08:00', 11),
+      },
+    })
+    await openStablePage(page)
+
+    for (const delay of [5_000, 5_000, 10_000, 20_000, 5_000])
+      await fixture.advanceTime(delay)
+    await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'confirmed-missing')
+
+    // Once all finite retries are exhausted the scheduler waits for the next
+    // sample-aware heartbeat. The late backend value must replace the real gap.
+    await fixture.advanceTime(56_000)
+    for (const metric of ['latency', 'loss'] as const)
+      await expectNodeCardPingBucketState(page, metric, PING_INGESTION_BUCKET, 'data')
+    await expectNodeCardPingTooltip(page, 'latency', '12:00:00\n11 ms')
+    expect(fixture.timeline.some(entry => entry.responseSamples
+      .some(sample => sample.sampleAt === Date.parse(PING_INGESTION_SAMPLE) && sample.latency === 11))).toBe(true)
+  })
+
+  test('v1.3.3 keeps warm selected snapshots isolated from a clean browser context', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    await installKomariFixture(page, {
+      fakeTimers: true,
+      clockNow: PING_INGESTION_CLOCK,
+      preserveStorageOnReload: true,
+      nodeCardPingTaskBindings: primaryBinding(202),
+      nodeCardPingFixture: {
+        metric: 'valid',
+        sampleSchedule: scheduledPingSamples('2026-07-25T12:10:00.000+08:00', 99, 71),
+      },
+    })
+    await openStablePage(page)
+    await expectNodeCardPingTooltip(page, 'latency', '11:59:00\n71 ms')
+    expect(await page.evaluate(() => Object.keys(localStorage)
+      .some(key => key.startsWith('komari-theme-emerald:selected-node-ping-stats:')))).toBe(true)
+
+    const browser = page.context().browser()
+    if (!browser)
+      throw new Error('Playwright browser is required for cold-context Ping regression coverage')
+    const coldContext = await browser.newContext({
+      baseURL: 'http://127.0.0.1:4173',
+      locale: 'zh-CN',
+      timezoneId: 'Asia/Shanghai',
+    })
+    const coldPage = await coldContext.newPage()
+    try {
+      await coldPage.addInitScript(() => {
+        Object.defineProperty(window, '__coldPingFixtureStorageKeyCount', {
+          configurable: false,
+          value: Object.keys(localStorage).length,
+        })
+      })
+      await coldPage.setViewportSize({ width: 1280, height: 720 })
+      await installKomariFixture(coldPage, {
+        fakeTimers: true,
+        clockNow: PING_INGESTION_CLOCK,
+        nodeCardPingTaskBindings: primaryBinding(202),
+        nodeCardPingFixture: {
+          metric: 'valid',
+          sampleSchedule: scheduledPingSamples('2026-07-25T12:10:00.000+08:00', 9),
+        },
+      })
+      await openStablePage(coldPage)
+      await expectNodeCardPingBucketState(coldPage, 'latency', PING_INGESTION_BUCKET, 'pending')
+      await expectNodeCardPingTooltip(coldPage, 'latency', '11:59:00\n7 ms')
+      expect(await coldPage.evaluate(() => {
+        return (window as typeof window & { __coldPingFixtureStorageKeyCount?: number })
+          .__coldPingFixtureStorageKeyCount
+      })).toBe(0)
+      expect(await coldPage.evaluate(() => Object.keys(localStorage)
+        .some(key => key.includes('selected-node-ping-stats:')))).toBe(true)
+    }
+    finally {
+      await coldContext.close()
+    }
+  })
+
+  test('v1.3.3 only selected Ping localStorage or a fresh context makes a warmed snapshot cold', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    const warmSchedule = scheduledPingSamples('2026-07-25T12:10:00.000+08:00', 99, 71)
+    const fixture = await installKomariFixture(page, {
+      fakeTimers: true,
+      clockNow: PING_INGESTION_CLOCK,
+      preserveStorageOnReload: true,
+      nodeCardPingTaskBindings: primaryBinding(202),
+      nodeCardPingFixture: {
+        metric: 'valid',
+        sampleSchedule: warmSchedule,
+      },
+    })
+    await openStablePage(page)
+    await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'pending')
+    await expectNodeCardPingTooltip(page, 'latency', '11:59:00\n71 ms')
+    expect(await page.evaluate(() => Object.keys(localStorage)
+      .some(key => key.startsWith('komari-theme-emerald:selected-node-ping-stats:')))).toBe(true)
+
+    const reloadWithPausedPing = async () => {
+      const resumePingResponses = fixture.pausePingResponses()
+      await page.reload({ waitUntil: 'domcontentloaded' })
+      await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
+      return resumePingResponses
+    }
+    const expectWarmSelectedSnapshot = async () => {
+      await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'pending')
+      await expectNodeCardPingTooltip(page, 'latency', '11:59:00\n71 ms')
+    }
+
+    await page.context().clearCookies()
+    const resumeAfterCookieClear = await reloadWithPausedPing()
+    await expectWarmSelectedSnapshot()
+    resumeAfterCookieClear()
+
+    await page.evaluate(() => sessionStorage.clear())
+    const resumeAfterSessionStorageClear = await reloadWithPausedPing()
+    await expectWarmSelectedSnapshot()
+    resumeAfterSessionStorageClear()
+
+    await page.evaluate(async () => {
+      const factory = indexedDB as typeof indexedDB & {
+        databases?: () => Promise<Array<{ name?: string }>>
+      }
+      const databases = await factory.databases?.() ?? []
+      await Promise.all(databases.flatMap(({ name }) => {
+        if (!name)
+          return []
+        return [new Promise<void>((resolve) => {
+          const request = indexedDB.deleteDatabase(name)
+          request.addEventListener('success', () => resolve())
+          request.addEventListener('error', () => resolve())
+          request.addEventListener('blocked', () => resolve())
+        })]
+      }))
+    })
+    const resumeAfterIndexedDbClear = await reloadWithPausedPing()
+    await expectWarmSelectedSnapshot()
+    resumeAfterIndexedDbClear()
+
+    await page.evaluate(async () => {
+      if (!('caches' in window))
+        return
+      await Promise.all((await caches.keys()).map(cacheName => caches.delete(cacheName)))
+    })
+    const resumeAfterCacheStorageClear = await reloadWithPausedPing()
+    await expectWarmSelectedSnapshot()
+    resumeAfterCacheStorageClear()
+
+    await page.evaluate(() => {
+      for (let index = localStorage.length - 1; index >= 0; index--) {
+        const key = localStorage.key(index)
+        if (key?.startsWith('komari-theme-emerald:selected-node-ping-stats:'))
+          localStorage.removeItem(key)
+      }
+    })
+    const resumeColdPagePingResponses = await reloadWithPausedPing()
+    for (const metric of ['latency', 'loss'] as const)
+      await expectAllNodeCardPingBucketStates(page, metric, 'pending')
+    await expect(nodeCardPingPanel(page, 'latency')).not.toContainText('71 ms')
+    expect(await page.evaluate(() => Object.keys(localStorage)
+      .some(key => key.startsWith('komari-theme-emerald:selected-node-ping-stats:')))).toBe(false)
+    resumeColdPagePingResponses()
+
+    const browser = page.context().browser()
+    if (!browser)
+      throw new Error('Playwright browser is required for fresh-context Ping cache coverage')
+    // Playwright has no deterministic in-place HTTP-cache clearing API, so a
+    // fresh context is the controlled HTTP-cache / Clear-Site-Data proxy here.
+    const coldContext = await browser.newContext({
+      baseURL: 'http://127.0.0.1:4173',
+      locale: 'zh-CN',
+      timezoneId: 'Asia/Shanghai',
+    })
+    const coldPage = await coldContext.newPage()
+    try {
+      await coldPage.setViewportSize({ width: 1280, height: 720 })
+      const coldFixture = await installKomariFixture(coldPage, {
+        fakeTimers: true,
+        clockNow: PING_INGESTION_CLOCK,
+        preserveStorageOnReload: true,
+        nodeCardPingTaskBindings: primaryBinding(202),
+        nodeCardPingFixture: {
+          metric: 'valid',
+          sampleSchedule: warmSchedule,
+        },
+      })
+      const resumeColdContextPingResponses = coldFixture.pausePingResponses()
+      await coldPage.goto('/')
+      await expect(coldPage.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
+      for (const metric of ['latency', 'loss'] as const)
+        await expectAllNodeCardPingBucketStates(coldPage, metric, 'pending')
+      await expect(nodeCardPingPanel(coldPage, 'latency')).not.toContainText('71 ms')
+      expect(await coldPage.evaluate(() => Object.keys(localStorage)
+        .some(key => key.startsWith('komari-theme-emerald:selected-node-ping-stats:')))).toBe(false)
+      resumeColdContextPingResponses()
+    }
+    finally {
+      await coldContext.close()
+    }
+  })
+
+  test('v1.3.3 bounds pending retries and releases the scheduler after NodeCard unmounts', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    const fixture = await installKomariFixture(page, {
+      fakeTimers: true,
+      clockNow: PING_INGESTION_CLOCK,
+      nodeCardPingTaskBindings: primaryBinding(202),
+      nodeCardPingFixture: {
+        metric: 'valid',
+        sampleSchedule: scheduledPingSamples('2026-07-25T12:10:00.000+08:00'),
+      },
+    })
+    await openStablePage(page)
+
+    await fixture.advanceTime(45_000)
+    const pendingRetryCount = selectedPingMetricTimelineEntries(fixture.timeline).length
+    // One initial fetch plus the bounded 5/10/20 retry cadence; this catches a
+    // one-second or per-card polling regression without freezing the test.
+    expect(pendingRetryCount).toBeGreaterThanOrEqual(4)
+    expect(pendingRetryCount).toBeLessThanOrEqual(6)
+
+    await page.getByLabel('列表视图').click()
+    fixture.timeline.length = 0
+    await fixture.advanceTime(180_000)
+    expect(selectedPingMetricTimelineEntries(fixture.timeline)).toHaveLength(0)
+  })
+
+  test('v1.3.3 bounds page-level pending RPCs to one selected query per bound node and retry epoch', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    const fixture = await installKomariFixture(page, {
+      fakeTimers: true,
+      clockNow: PING_INGESTION_CLOCK,
+      nodeCardPingTaskBindings: allNodeBindings(202),
+      nodeCardPingFixture: {
+        metric: 'valid',
+        sampleSchedule: scheduledPingSamples('2026-07-25T12:10:00.000+08:00'),
+      },
+    })
+    await openStablePage(page)
+
+    const selectedRequests = () => selectedPingMetricTimelineEntries(fixture.timeline)
+    await expect.poll(() => selectedRequests().length).toBe(12)
+    expect([...new Set(selectedRequests().map(entry => entry.params.entity_id))]).toHaveLength(12)
+    expect(fixture.timeline.filter(entry => entry.method === 'public:getPublicPingTasks')).toHaveLength(1)
+
+    await fixture.advanceTime(45_000)
+    const requestsByNode = new Map<string, number>()
+    for (const entry of selectedRequests()) {
+      const uuid = entry.params.entity_id
+      if (typeof uuid === 'string')
+        requestsByNode.set(uuid, (requestsByNode.get(uuid) ?? 0) + 1)
+    }
+
+    // Each node needs its own entity-scoped data, but all twelve consumers must
+    // share the bounded 5/10/20 scheduler cadence instead of multiplying it.
+    expect(selectedRequests().length).toBeGreaterThanOrEqual(12 * 4)
+    expect(selectedRequests().length).toBeLessThanOrEqual(12 * 6)
+    expect([...requestsByNode]).toHaveLength(12)
+    expect([...requestsByNode.values()].every(count => count >= 4 && count <= 6)).toBe(true)
   })
 
   test('keeps an accepted selected-task snapshot when its next refresh fails', async ({ page }) => {
@@ -987,7 +1634,7 @@ test.describe('node-card per-node ping task bindings', () => {
     expect(calls.filter(call => call.method === 'public:queryMetrics' && isPingMetricQuery(call.params) && !(call.params.tags as Record<string, unknown> | undefined)?.task_id)).toHaveLength(0)
   })
 
-  test('selected Metric and Legacy failures keep each valid binding empty without querying the aggregate', async ({ page }) => {
+  test('selected Metric failure with a successful empty Legacy response keeps each valid binding empty without querying the aggregate', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
       if (!request.url().endsWith('/api/rpc2'))
@@ -1169,7 +1816,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectNodeCardPingTooltip(page, 'loss', '0.0%')
   })
 
-  test('a valid 100% loss Metric binding keeps latency empty, uses only its task, and recovers automatically', async ({ page }) => {
+  test('a valid 100% loss Metric binding keeps summary latency empty, uses only its task, and recovers automatically', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
       if (!request.url().endsWith('/api/rpc2'))
@@ -1322,7 +1969,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectNodeCardPingTooltip(page, 'loss', '100.0%')
   })
 
-  test('keeps a valid binding empty when selected Metric and Legacy data are unavailable', async ({ page }) => {
+  test('keeps a valid binding empty after Metric failure and a successful empty Legacy response', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 })
     await installKomariFixture(page, {
       nodeCardPingTaskBindings: primaryBinding(202),

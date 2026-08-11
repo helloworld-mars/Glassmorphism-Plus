@@ -114,13 +114,14 @@ Do not rename/move these files without updating helper mappings and checking all
 
 ## Validation
 
-For source changes, run from repo root:
+For source changes, run from repo root. The root `AGENTS.md` release/safety contract remains mandatory:
 
 ```bash
 bun run lint
 bun run build
+bun run test:visual
 ```
 
-There is no test suite. Do not invent one.
+`tests/visual/` is the deterministic Playwright regression suite. Run the relevant tests for every behavior change and use the full suite for a formal release. Do not invent an unrelated `bun test`/Vitest command.
 
 Update [../AICACHE.md](../AICACHE.md) with validation results or explain why validation was skipped.

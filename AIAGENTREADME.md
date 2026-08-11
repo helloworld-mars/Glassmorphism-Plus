@@ -62,12 +62,15 @@ bun run preview   # 预览 production build
 bun run lint      # eslint --fix --cache
 ```
 
-当前没有测试套件。验证源码变更通常只跑：
+本项目有确定性的 Playwright 回归套件：
 
 ```bash
 bun run lint
 bun run build
+bun run test:visual
 ```
+
+对小范围源码变更至少运行相关用例；正式版本必须运行完整视觉/行为回归并遵守根 `AGENTS.md` 的发布、隐私和本地安装包规则。
 
 ## 4. 根目录地图
 
@@ -103,7 +106,7 @@ preview.png
 dist/
 ```
 
-`bun run release:prepare` only creates the populated `<source-parent>/<version>/Glassmorphism-Plus-release-<version>/` snapshot after verifying the ZIP. Create the sibling `Glassmorphism-Plus-publish-<version>/` separately by cloning the approved publishing repository so its `.git` history remains intact. Release ZIP uploads are manual.
+`bun run release:prepare` only creates the populated `<source-parent>/<version>/Glassmorphism-Plus-release-<version>/` snapshot after verifying the ZIP. Create the sibling `Glassmorphism-Plus-publish-<version>/` separately by cloning the approved publishing repository so its `.git` history remains intact. The final customer ZIP stays local unless the user explicitly authorizes uploading that exact asset.
 
 Vite 注入的全局常量：
 
@@ -398,7 +401,7 @@ HomeView tool button
 2. 本地跑 `bun run build`，确认生成动态版本路径的安装 ZIP。
 3. 跑 `bun run release:prepare`，建立并验证过滤后的 release snapshot。
 4. 在动态 publish 路径 clone 已核准的 GitHub target，审查后同步有效 source、提交并推送。
-5. 如需 Tag / GitHub Release，手动 dispatch workflow；不要上传 ZIP asset。由维护者手动上传已验证的版本 ZIP。
+5. 如需 Tag / GitHub Release，手动 dispatch workflow；不要上传 ZIP asset。已验证的最终客户 ZIP 默认只保留本地，只有用户明确授权该次上传时才处理。
 6. 查 Release tag、Release 页面与 Actions，并在 [AICACHE.md](AICACHE.md) 记录验证链接/结果。
 
 ## 13. 里程碑边界

@@ -9,6 +9,8 @@ export type NodePingMetric = 'latency' | 'loss'
 
 export interface NodePingBar {
   key: string
+  time: string
+  state: 'pending' | 'data' | 'confirmed-missing'
   className: string
   tooltip: string
 }
@@ -91,19 +93,37 @@ export function useNodePingDisplay(
 
     return points.map((point, index) => {
       const value = point[metric]
+      const state = metric === 'latency' ? point.latencyState : point.lossState
+      const sampleTime = metric === 'latency' ? point.latencySampleTime : point.lossSampleTime
+      const timestamp = formatDateTime(sampleTime ?? point.time, 'HH:mm:ss')
 
       return {
         key: `${point.time}-${index}`,
-        className: value === null
-          ? 'bg-muted-foreground/15'
-          : metric === 'latency'
-            ? getLatencyToneClass(value)
-            : getLossToneClass(value),
-        tooltip: value === null
-          ? `${formatDateTime(point.time, 'HH:mm:ss')}\n无采样数据`
-          : metric === 'latency'
-            ? `${formatDateTime(point.time, 'HH:mm:ss')}\n${Math.round(value)} ms`
-            : `${formatDateTime(point.time, 'HH:mm:ss')}\n${value.toFixed(1)}%`,
+        time: point.time,
+        state,
+        // Reserve the fixed twenty-bar geometry but leave an open bucket
+        // visually unfinished. It must not masquerade as a confirmed gap.
+        className: state === 'pending'
+          ? 'bg-transparent'
+          : value === null
+            ? 'bg-muted-foreground/15'
+            : metric === 'latency'
+              ? getLatencyToneClass(value)
+              : getLossToneClass(value),
+        tooltip: state === 'pending'
+          // Keep a failed transport visibly diagnosable without turning it
+          // into a false \"no sample\" claim. Normal pending buckets remain
+          // quiet so their unfinished state does not look like telemetry.
+          ? pingStats.error.value ? `${timestamp}\n加载失败，等待重试` : ''
+          : value === null
+            ? state === 'data' && metric === 'latency'
+              ? `${timestamp}\n延迟不可用（100% 丢包）`
+              : state === 'confirmed-missing'
+                ? `${timestamp}\n无采样数据`
+                : `${timestamp}\n暂无有效数据`
+            : metric === 'latency'
+              ? `${timestamp}\n${Math.round(value)} ms`
+              : `${timestamp}\n${value.toFixed(1)}%`,
       }
     })
   }
@@ -119,10 +139,16 @@ export function useNodePingDisplay(
               ? '无采样数据'
               : '无采样数据'
 
+    // A failed transport is not evidence that a probe was missing. Keep the
+    // empty strip in its pending state until a successful response can make a
+    // real missing-data decision.
+    const pending = pingStats.loading.value || !!pingStats.error.value
     return Array.from({ length: EMPTY_PING_BAR_COUNT }, (_, index) => ({
       key: `${metric}-empty-${index}`,
-      className: 'bg-muted-foreground/10',
-      tooltip,
+      time: '',
+      state: pending ? 'pending' : 'confirmed-missing',
+      className: pending ? 'bg-transparent' : 'bg-muted-foreground/10',
+      tooltip: pending && !pingStats.error.value ? '' : tooltip,
     }))
   }
 

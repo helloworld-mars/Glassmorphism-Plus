@@ -60,6 +60,18 @@ __screenshots__/
 # Playwright
 playwright-report/
 test-results/
+playwright/.auth/
+playwright/.cache/
+storageState*.json
+storage-state*.json
+*.storage-state.json
+*.trace
+
+# Local browser debugging state (may contain cookies, sessions, or profiles)
+.browser-profile/
+browser-profile/
+chrome-profile/
+chrome-user-data/
 
 # Vite
 *.timestamp-*-*.mjs

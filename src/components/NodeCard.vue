@@ -535,6 +535,8 @@ function hasRegion(region: string | null | undefined): boolean {
               <DataTooltip
                 v-for="bar in panel.bars" :key="bar.key"
                 data-node-ping-bar
+                :data-node-ping-bucket-time="bar.time || undefined"
+                :data-node-ping-state="bar.state"
                 placement="top" :content="bar.tooltip" class="h-full min-w-0 w-full"
               >
                 <span

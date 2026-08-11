@@ -12,7 +12,6 @@ export const CACHE_CONFIG = {
     ttl: 30 * TIME_MS.second,
   },
   nodePingSummary: {
-    refreshInterval: TIME_MS.minute,
     historyBucketCount: 20,
     historyBucketAlignment: 3 * TIME_MS.minute,
     taskCatalog: {

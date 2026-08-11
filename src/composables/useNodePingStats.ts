@@ -1,5 +1,6 @@
 import type { MaybeRefOrGetter } from 'vue'
-import type { PingRefreshOutcome } from '@/services/ping-refresh-scheduler.service'
+import type { PingRefreshOutcome, PingRefreshSubscription } from '@/services/ping-refresh-scheduler.service'
+import type { PingHistoryBucketState } from '@/utils/pingHistoryState'
 import type { PingTimeWindow } from '@/utils/pingTime'
 import type { PingMetricTaskStats } from '@/utils/rpc'
 import { useThrottleFn } from '@vueuse/core'
@@ -8,16 +9,25 @@ import { CACHE_CONFIG } from '@/constants/cache'
 import { PING_RECORD_MAX_COUNT } from '@/constants/load'
 import { SharedCache } from '@/services/cache.service'
 import { abortPingRecords, loadPingRecords } from '@/services/history.service'
-import { abortPingMetricStats, abortQueryMetrics, getAssignedPublicPingTask, loadPingMetricStats, loadPublicPingTaskCatalog, queryMetrics } from '@/services/metrics.service'
+import { abortPingMetricStats, abortQueryMetrics, getAssignedPublicPingTask, getCachedRawPingMetricSeries, loadPingMetricStats, loadPublicPingTaskCatalog, queryMetrics } from '@/services/metrics.service'
 import { pingRefreshScheduler } from '@/services/ping-refresh-scheduler.service'
 import { isPingMetric, normalizeMetricSeriesList, PING_LATENCY_METRIC, PING_LOSS_METRIC, pingTaskId } from '@/utils/metricSeries'
+import { resolvePingHistoryBucketState } from '@/utils/pingHistoryState'
 import { createNextAlignedPingTimeWindow, getPingTimeBucketIndex, isPingTimestampInWindow, parsePingTimestampMs } from '@/utils/pingTime'
 
 export interface NodePingHistoryPoint {
+  /** Stable three-minute bucket identity/start; never rewrite this to a sample timestamp. */
   time: string
   latency: number | null
   loss: number | null
+  /** Latest real observation included in this bucket for the rendered metric. */
+  latencySampleTime: string | null
+  lossSampleTime: string | null
+  latencyState: PingHistoryBucketState
+  lossState: PingHistoryBucketState
 }
+
+export type { PingHistoryBucketState } from '@/utils/pingHistoryState'
 
 export interface NodePingStatsState {
   avgLatency: number | null
@@ -51,6 +61,11 @@ interface SharedPingRecordsState {
   recordsByClient: Map<string, PingRecord[]>
   source: 'metric' | 'legacy'
   window: PingTimeWindow
+  latestSampleAt: number | null
+  firstObservedAt: number
+  taskIntervalMs: number
+  canConfirmMissing: boolean
+  metricQueryError?: string | null
   metricStats?: PingMetricTaskStats[]
   metricLossPoints?: MetricLossPoint[]
 }
@@ -60,9 +75,8 @@ interface SharedPingRecordsEntry {
   loading: ReturnType<typeof ref<boolean>>
   error: ReturnType<typeof ref<string | null>>
   promise: Promise<void> | null
-  refreshTimer: ReturnType<typeof setInterval> | null
+  schedulerSubscription: PingRefreshSubscription | null
   subscribers: number
-  lastFetchedAt: number
   requestWindow: PingTimeWindow | null
 }
 
@@ -70,10 +84,14 @@ type SelectedPingTaskSource = 'metric' | 'legacy'
 
 interface SelectedPingTaskSnapshot {
   stats: NodePingStatsState
-  latestSampleAt: number
+  latestSampleAt: number | null
+  windowStart: number
+  windowEnd: number
+  firstObservedAt: number
   fetchedAt: number
   source: SelectedPingTaskSource
   taskIntervalMs: number
+  canConfirmMissing: boolean
   stale: boolean
 }
 
@@ -81,6 +99,7 @@ interface SelectedPingTaskLoadResult {
   snapshot: SelectedPingTaskSnapshot | null
   taskIntervalMs: number
   bindingState: SelectedPingTaskBindingState
+  error: string | null
 }
 
 type SelectedPingTaskBindingState = 'unknown' | 'valid' | 'invalid'
@@ -96,13 +115,12 @@ interface SelectedPingTaskStatsEntry {
 }
 
 const HISTORY_BUCKET_COUNT = CACHE_CONFIG.nodePingSummary.historyBucketCount
-const CACHE_VERSION = 9
+const CACHE_VERSION = 12
 const CACHE_KEY_PREFIX = 'komari-theme-emerald:node-ping-stats'
-const SELECTED_CACHE_VERSION = 2
-const SELECTED_CACHE_QUERY_VERSION = 'metric-window-v2'
+const SELECTED_CACHE_VERSION = 5
+const SELECTED_CACHE_QUERY_VERSION = 'metric-window-v5'
 const SELECTED_CACHE_KEY_PREFIX = 'komari-theme-emerald:selected-node-ping-stats'
 const FULL_LOSS_EPSILON = 1e-6
-const PING_RECORD_REFRESH_INTERVAL_MS = CACHE_CONFIG.nodePingSummary.refreshInterval
 const POSITIVE_INTEGER_TASK_ID_PATTERN = /^\d+$/
 const sharedPingRecordsCache = new SharedCache<SharedPingRecordsEntry>({
   maxSize: CACHE_CONFIG.nodePingSummary.sharedRecords.maxSize,
@@ -238,10 +256,26 @@ function isValidHistoryPoint(value: unknown): value is NodePingHistoryPoint {
   const point = value as Record<string, unknown>
   const latency = point.latency
   const loss = point.loss
+  const latencySampleTime = point.latencySampleTime
+  const lossSampleTime = point.lossSampleTime
+  const latencyState = point.latencyState
+  const lossState = point.lossState
 
   return typeof point.time === 'string'
     && (latency === null || typeof latency === 'number')
     && (loss === null || typeof loss === 'number')
+    && isNullablePingSampleTime(latencySampleTime)
+    && isNullablePingSampleTime(lossSampleTime)
+    && isPingHistoryBucketState(latencyState)
+    && isPingHistoryBucketState(lossState)
+}
+
+function isNullablePingSampleTime(value: unknown): value is string | null {
+  return value === null || (typeof value === 'string' && parsePingTimestampMs(value) !== null)
+}
+
+function isPingHistoryBucketState(value: unknown): value is PingHistoryBucketState {
+  return value === 'pending' || value === 'data' || value === 'confirmed-missing'
 }
 
 function isValidStatsState(value: unknown): value is NodePingStatsState {
@@ -261,14 +295,27 @@ function readStatsCache(uuid: string, hours: number, maxCount?: number): NodePin
   if (typeof window === 'undefined')
     return null
 
+  const activeWindow = getAlignedPingHistoryWindow(hours)
+  const activeWindowStart = new Date(activeWindow.start).toISOString()
   try {
     const raw = window.localStorage.getItem(getCacheKey(uuid, hours, maxCount))
     if (!raw)
       return null
 
-    const parsed = JSON.parse(raw) as { version?: number, stats?: unknown }
-    if (parsed.version !== CACHE_VERSION || !isValidStatsState(parsed.stats))
+    const parsed = JSON.parse(raw) as {
+      version?: number
+      expiresAt?: number
+      windowStart?: string
+      stats?: unknown
+    }
+    if (parsed.version !== CACHE_VERSION
+      || !isFiniteNumber(parsed.expiresAt)
+      || parsed.expiresAt <= Date.now()
+      || parsed.windowStart !== activeWindowStart
+      || !isValidStatsState(parsed.stats)) {
+      window.localStorage.removeItem(getCacheKey(uuid, hours, maxCount))
       return null
+    }
 
     return parsed.stats
   }
@@ -281,12 +328,18 @@ function writeStatsCache(uuid: string, hours: number, maxCount: number | undefin
   if (typeof window === 'undefined')
     return
 
+  const windowStart = value.history[0]?.time
+  if (!windowStart)
+    return
+
   try {
     window.localStorage.setItem(
       getCacheKey(uuid, hours, maxCount),
       JSON.stringify({
         version: CACHE_VERSION,
         updatedAt: new Date().toISOString(),
+        expiresAt: Date.now() + CACHE_CONFIG.nodePingSummary.historyBucketAlignment,
+        windowStart,
         stats: value,
       }),
     )
@@ -302,11 +355,16 @@ function isValidSelectedPingTaskSnapshot(value: unknown): value is SelectedPingT
   const snapshot = value as Partial<SelectedPingTaskSnapshot>
   return isValidStatsState(snapshot.stats)
     && snapshot.stats.history.length === HISTORY_BUCKET_COUNT
-    && isFiniteNumber(snapshot.latestSampleAt)
+    && (snapshot.latestSampleAt === null || isFiniteNumber(snapshot.latestSampleAt))
+    && isFiniteNumber(snapshot.windowStart)
+    && isFiniteNumber(snapshot.windowEnd)
+    && snapshot.windowEnd > snapshot.windowStart
+    && isFiniteNumber(snapshot.firstObservedAt)
     && isFiniteNumber(snapshot.fetchedAt)
     && (snapshot.source === 'metric' || snapshot.source === 'legacy')
     && isFiniteNumber(snapshot.taskIntervalMs)
     && snapshot.taskIntervalMs > 0
+    && typeof snapshot.canConfirmMissing === 'boolean'
     && typeof snapshot.stale === 'boolean'
 }
 
@@ -432,9 +490,8 @@ function createSharedPingRecordsEntry(): SharedPingRecordsEntry {
     loading: ref(false),
     error: ref<string | null>(null),
     promise: null,
-    refreshTimer: null,
+    schedulerSubscription: null,
     subscribers: 0,
-    lastFetchedAt: 0,
     requestWindow: null,
   }
 }
@@ -471,6 +528,42 @@ function buildRecordsByClient(records: PingRecord[]): Map<string, PingRecord[]> 
   return grouped
 }
 
+function hasRawPingSamples(state: SharedPingRecordsState): boolean {
+  return [...state.recordsByClient.values()].some(records => records.length > 0)
+    || (state.metricLossPoints?.length ?? 0) > 0
+}
+
+function createLegacyPingRecordsState(
+  records: PingRecord[],
+  window: PingTimeWindow,
+  firstObservedAt: number,
+): SharedPingRecordsState {
+  return {
+    recordsByClient: buildRecordsByClient(records),
+    source: 'legacy',
+    window,
+    latestSampleAt: latestPingTimestamp(records),
+    firstObservedAt,
+    taskIntervalMs: CACHE_CONFIG.nodePingSummary.refresh.heartbeat,
+    canConfirmMissing: true,
+  }
+}
+
+function createUnavailablePingRecordsState(
+  window: PingTimeWindow,
+  firstObservedAt: number,
+): SharedPingRecordsState {
+  return {
+    recordsByClient: new Map(),
+    source: 'metric',
+    window,
+    latestSampleAt: null,
+    firstObservedAt,
+    taskIntervalMs: CACHE_CONFIG.nodePingSummary.refresh.heartbeat,
+    canConfirmMissing: false,
+  }
+}
+
 function normalizeTaskId(taskId: string): number {
   if (!taskId.trim())
     return Number.NaN
@@ -491,6 +584,7 @@ async function loadPingMetricRecords(
   maxCount: number | undefined,
   window: PingTimeWindow,
   selectedTaskId?: string,
+  firstObservedAt = Date.now(),
 ): Promise<SharedPingRecordsState | null> {
   const start = new Date(window.start).toISOString()
   const end = new Date(window.end).toISOString()
@@ -525,11 +619,13 @@ async function loadPingMetricRecords(
     : rawStats
   const metricRecords: PingRecord[] = []
   const metricLossPoints: MetricLossPoint[] = []
-  const metricLossTaskIds = new Set<number>()
-  const metricLatencyTaskIds = new Set<number>()
+  const cachedMetricSeries = getCachedRawPingMetricSeries(nodeUuid, start, end)
+  const rawMetricSeries = cachedMetricSeries ?? (
+    metricsResult.status === 'fulfilled' ? metricsResult.value.series : null
+  )
 
-  if (metricsResult.status === 'fulfilled') {
-    const seriesList = normalizeMetricSeriesList(metricsResult.value.series)
+  if (rawMetricSeries) {
+    const seriesList = normalizeMetricSeriesList(rawMetricSeries)
     for (const series of seriesList) {
       if (series.entity_id !== nodeUuid)
         continue
@@ -555,7 +651,6 @@ async function loadPingMetricRecords(
             value: point.value,
             count: isFiniteNumber(point.count) && point.count > 0 ? point.count : 1,
           })
-          metricLossTaskIds.add(taskId)
         }
         continue
       }
@@ -574,35 +669,37 @@ async function loadPingMetricRecords(
           time: point.time,
           value: point.value,
         })
-        metricLatencyTaskIds.add(taskId)
       }
     }
   }
 
   const recordsByClient = buildRecordsByClient(metricRecords)
-  const exactLatencyTaskIds = new Set(
-    stats
-      .filter(stat => stat.total > 0 && stat.valid > 0 && (isFiniteNumber(stat.avg) || isFiniteNumber(stat.latest)))
-      .map(stat => normalizeTaskId(stat.task_id)),
-  )
-  const exactLossTaskIds = new Set(
-    stats
-      .filter(stat => stat.total > 0 && !stat.loss_approximate && isFiniteNumber(stat.loss))
-      .map(stat => normalizeTaskId(stat.task_id)),
-  )
-  const hasCompleteLossSeries = selectedTaskId
-    ? exactLossTaskIds.size > 0 && metricLossPoints.length > 0
-    : exactLossTaskIds.size > 0 && [...exactLossTaskIds].every(taskId => metricLossTaskIds.has(taskId))
-  const hasCompleteLatencySeries = selectedTaskId
-    ? exactLatencyTaskIds.size === 0 || metricRecords.length > 0
-    : exactLatencyTaskIds.size > 0 && [...exactLatencyTaskIds].every(taskId => metricLatencyTaskIds.has(taskId))
-  if (!hasCompleteLatencySeries || !hasCompleteLossSeries)
+  // A latency sample is still real data when the independently-written loss
+  // series arrives later. The Detail chart may have already returned those raw
+  // samples for this exact window, so keep them on a transient NodeCard query
+  // failure. A cached response is data only, never proof that an unseen bucket
+  // is permanently missing.
+  if (!rawMetricSeries)
     return null
+
+  const taskIntervals = stats
+    .map(stat => stat.interval)
+    .filter((interval): interval is number => isFiniteNumber(interval) && interval > 0)
+  const taskIntervalMs = taskIntervals.length
+    ? Math.min(...taskIntervals) * 1000
+    : CACHE_CONFIG.nodePingSummary.refresh.heartbeat
 
   return {
     recordsByClient,
     source: 'metric',
     window,
+    latestSampleAt: latestPingTimestamp([...metricRecords, ...metricLossPoints]),
+    firstObservedAt,
+    taskIntervalMs,
+    canConfirmMissing: metricsResult.status === 'fulfilled',
+    metricQueryError: metricsResult.status === 'rejected'
+      ? metricsResult.reason instanceof Error ? metricsResult.reason.message : '获取 Ping Metric 失败'
+      : null,
     metricStats: stats,
     metricLossPoints,
   }
@@ -623,27 +720,66 @@ async function loadSharedPingRecords(
   entry.requestWindow = window
 
   entry.promise = (async () => {
+    const previousState = entry.data.value
+    const firstObservedAt = previousState?.window.start === window.start
+      ? previousState.firstObservedAt
+      : Date.now()
+    let metricState: SharedPingRecordsState | null = null
+    let metricError: Error | null = null
+    let legacyState: SharedPingRecordsState | null = null
+    let legacyError: Error | null = null
+
     try {
-      const metricState = nodeUuid ? await loadPingMetricRecords(nodeUuid, hours, maxCount, window).catch(() => null) : null
+      if (nodeUuid) {
+        try {
+          metricState = await loadPingMetricRecords(nodeUuid, hours, maxCount, window, undefined, firstObservedAt)
+        }
+        catch (error) {
+          metricError = error instanceof Error ? error : new Error('获取 Ping Metric 失败')
+        }
+      }
+
       if (entry.subscribers === 0)
         return
 
-      if (metricState) {
+      if (metricState && hasRawPingSamples(metricState)) {
+        entry.error.value = metricState.metricQueryError ?? null
         entry.data.value = metricState
+        return
       }
-      else {
+
+      try {
         const records = await loadPingRecords(hours, maxCount, nodeUuid)
-        entry.data.value = {
-          recordsByClient: buildRecordsByClient(records),
-          source: 'legacy',
-          window,
-        }
+        legacyState = createLegacyPingRecordsState(records, window, firstObservedAt)
       }
-      entry.lastFetchedAt = Date.now()
-    }
-    catch (err) {
-      entry.error.value = err instanceof Error ? err.message : '获取 Ping 历史失败'
-      throw err
+      catch (error) {
+        legacyError = error instanceof Error ? error : new Error('获取 Ping 历史失败')
+      }
+
+      if (entry.subscribers === 0)
+        return
+
+      // A successful empty Legacy response can make a real missing-data
+      // decision when the Metric transport failed. Do not let a cache-backed
+      // Metric placeholder discard that successful evidence.
+      if (legacyState && (hasRawPingSamples(legacyState) || !metricState || !metricState.canConfirmMissing)) {
+        entry.data.value = legacyState
+        return
+      }
+
+      if (metricState) {
+        entry.error.value = metricState.metricQueryError ?? legacyError?.message ?? null
+        entry.data.value = metricState
+        return
+      }
+
+      // Neither transport established an empty raw response. Retain a
+      // same-window snapshot when possible and mark its unknown buckets as
+      // pending; a network error is never proof of missing telemetry.
+      entry.error.value = metricError?.message ?? legacyError?.message ?? '获取 Ping 历史失败'
+      entry.data.value = previousState?.window.start === window.start
+        ? { ...previousState, canConfirmMissing: false }
+        : createUnavailablePingRecordsState(window, firstObservedAt)
     }
     finally {
       entry.loading.value = false
@@ -655,21 +791,41 @@ async function loadSharedPingRecords(
   return entry.promise
 }
 
+async function refreshSharedPingRecordsEntry(
+  entry: SharedPingRecordsEntry,
+  hours: number,
+  maxCount?: number,
+  uuid?: string,
+): Promise<PingRefreshOutcome> {
+  const previousLatestSampleAt = entry.data.value?.latestSampleAt ?? null
+  await loadSharedPingRecords(entry, hours, maxCount, uuid)
+  const nextState = entry.data.value
+  const latestSampleAt = nextState?.latestSampleAt ?? previousLatestSampleAt
+  return {
+    advanced: latestSampleAt !== null && (previousLatestSampleAt === null || latestSampleAt > previousLatestSampleAt),
+    latestSampleAt,
+    taskIntervalMs: nextState?.taskIntervalMs ?? CACHE_CONFIG.nodePingSummary.refresh.heartbeat,
+  }
+}
+
 function startSharedPingRecordsRefresh(entry: SharedPingRecordsEntry, hours: number, maxCount?: number, uuid?: string): void {
-  if (entry.refreshTimer)
+  if (entry.schedulerSubscription)
     return
 
-  entry.refreshTimer = setInterval(() => {
-    void loadSharedPingRecords(entry, hours, maxCount, uuid).catch(() => {})
-  }, PING_RECORD_REFRESH_INTERVAL_MS)
+  const key = `aggregate:${getSharedPingRecordsKey(hours, maxCount, uuid)}`
+  entry.schedulerSubscription = pingRefreshScheduler.subscribe(
+    key,
+    () => refreshSharedPingRecordsEntry(entry, hours, maxCount, uuid),
+    {
+      latestSampleAt: entry.data.value?.latestSampleAt,
+      taskIntervalMs: entry.data.value?.taskIntervalMs,
+    },
+  )
 }
 
 function stopSharedPingRecordsRefresh(entry: SharedPingRecordsEntry): void {
-  if (!entry.refreshTimer)
-    return
-
-  clearInterval(entry.refreshTimer)
-  entry.refreshTimer = null
+  entry.schedulerSubscription?.release()
+  entry.schedulerSubscription = null
 }
 
 function abortSharedPingRecordsRequests(
@@ -725,12 +881,27 @@ interface PingHistoryBucket {
   lostCount: number
   metricLossSum: number
   metricLossCount: number
+  latencySampleAt: number | null
+  lossSampleAt: number | null
+}
+
+interface PingHistoryTiming {
+  latestAcceptedSampleAt?: number | null
+  firstObservedAt?: number
+  taskIntervalMs?: number
+  canConfirmMissing?: boolean
+  now?: number
+}
+
+function hasHistoryData(history: NodePingHistoryPoint[]): boolean {
+  return history.some(point => point.latencyState === 'data' || point.lossState === 'data')
 }
 
 function buildPingHistory(
   records: PingRecord[],
   metricLossPoints: MetricLossPoint[] | undefined,
   window: PingTimeWindow,
+  timing: PingHistoryTiming = {},
 ): NodePingHistoryPoint[] {
   const buckets: PingHistoryBucket[] = []
   for (let index = 0; index < HISTORY_BUCKET_COUNT; index++) {
@@ -741,22 +912,24 @@ function buildPingHistory(
       lostCount: 0,
       metricLossSum: 0,
       metricLossCount: 0,
+      latencySampleAt: null,
+      lossSampleAt: null,
     })
   }
-  let hasRecords = false
-  let hasMetricLossPoints = false
-
   for (const record of records) {
     const timestamp = parsePingTimestampMs(record.time)
-    const bucketIndex = timestamp === null ? null : getPingTimeBucketIndex(timestamp, window)
-    if (bucketIndex === null || !isFiniteNumber(record.value))
+    if (timestamp === null || !isFiniteNumber(record.value))
+      continue
+
+    const bucketIndex = getPingTimeBucketIndex(timestamp, window)
+    if (bucketIndex === null)
       continue
 
     const bucket = buckets[bucketIndex]
     if (!bucket)
       continue
-    hasRecords = true
     bucket.totalCount += 1
+    bucket.latencySampleAt = Math.max(bucket.latencySampleAt ?? Number.NEGATIVE_INFINITY, timestamp)
     if (record.value >= 0) {
       bucket.latencySum += record.value
       bucket.latencyCount += 1
@@ -768,28 +941,78 @@ function buildPingHistory(
 
   for (const point of metricLossPoints ?? []) {
     const timestamp = parsePingTimestampMs(point.time)
-    const bucketIndex = timestamp === null ? null : getPingTimeBucketIndex(timestamp, window)
-    if (bucketIndex === null || !isFiniteNumber(point.value) || !isFiniteNumber(point.count) || point.count <= 0)
+    if (timestamp === null || !isFiniteNumber(point.value) || !isFiniteNumber(point.count) || point.count <= 0)
+      continue
+
+    const bucketIndex = getPingTimeBucketIndex(timestamp, window)
+    if (bucketIndex === null)
       continue
 
     const bucket = buckets[bucketIndex]
     if (!bucket)
       continue
-    hasMetricLossPoints = true
     bucket.metricLossSum += point.value * point.count
     bucket.metricLossCount += point.count
+    bucket.lossSampleAt = Math.max(bucket.lossSampleAt ?? Number.NEGATIVE_INFINITY, timestamp)
   }
 
-  if (!hasRecords && !hasMetricLossPoints)
-    return []
+  const latestAcceptedSampleAt = timing.latestAcceptedSampleAt
+    ?? latestPingTimestamp([...records, ...(metricLossPoints ?? [])])
+  const taskIntervalMs = timing.taskIntervalMs ?? CACHE_CONFIG.nodePingSummary.refresh.heartbeat
+  const now = timing.now ?? Date.now()
+  const firstObservedAt = timing.firstObservedAt ?? now
+  const canConfirmMissing = timing.canConfirmMissing ?? true
 
-  return buckets.map((bucket, index) => ({
-    time: new Date(window.start + window.bucketWidth * index).toISOString(),
-    latency: bucket.latencyCount ? bucket.latencySum / bucket.latencyCount : null,
-    loss: metricLossPoints
+  return buckets.map((bucket, index) => {
+    const bucketStart = window.start + window.bucketWidth * index
+    const bucketEnd = bucketStart + window.bucketWidth
+    const latency = bucket.latencyCount ? bucket.latencySum / bucket.latencyCount : null
+    const loss = metricLossPoints
       ? (bucket.metricLossCount ? bucket.metricLossSum / bucket.metricLossCount * 100 : null)
-      : (bucket.totalCount ? bucket.lostCount / bucket.totalCount * 100 : null),
-  }))
+      : (bucket.totalCount ? bucket.lostCount / bucket.totalCount * 100 : null)
+    // A failed probe is still an observed sample. Do not turn 100% packet loss
+    // into a false “no sample” latency bucket merely because latency is null.
+    const hasLatencyObservation = bucket.latencyCount > 0
+      || bucket.totalCount > 0
+      || bucket.metricLossCount > 0
+    const latencyState = resolvePingHistoryBucketState(hasLatencyObservation, {
+      bucketStart,
+      bucketEnd,
+      now,
+      latestAcceptedSampleAt,
+      firstObservedAt,
+      taskIntervalMs,
+      canConfirmMissing,
+    })
+    const lossState = resolvePingHistoryBucketState(loss !== null, {
+      bucketStart,
+      bucketEnd,
+      now,
+      latestAcceptedSampleAt,
+      firstObservedAt,
+      taskIntervalMs,
+      canConfirmMissing,
+    })
+    // A full-loss raw Metric observation has no latency value, yet it still
+    // proves that a probe happened. Reuse that *real* loss timestamp only for
+    // this explicit latency-unavailable case; never manufacture a bucket time.
+    const latencySampleAt = bucket.latencySampleAt ?? bucket.lossSampleAt
+    const lossSampleAt = metricLossPoints ? bucket.lossSampleAt : bucket.latencySampleAt
+
+    return {
+      time: new Date(bucketStart).toISOString(),
+      latency,
+      loss,
+      latencySampleTime: latencyState === 'data' && latencySampleAt !== null
+        ? new Date(latencySampleAt).toISOString()
+        : null,
+      lossSampleTime: lossState === 'data' && lossSampleAt !== null
+        ? new Date(lossSampleAt).toISOString()
+        : null,
+      latencyState,
+      lossState,
+    }
+  })
 }
 
 function getPercentile(values: number[], percentile: number): number | null {
@@ -816,10 +1039,11 @@ function buildStats(
   metricStats: PingMetricTaskStats[] | undefined,
   metricLossPoints: MetricLossPoint[] | undefined,
   window: PingTimeWindow,
+  timing: PingHistoryTiming = {},
 ): NodePingStatsState {
   const statsWithSamples = (metricStats ?? []).filter(stat => stat.total > 0)
   if (statsWithSamples.length) {
-    const history = buildPingHistory(records.filter(record => record.value >= 0), metricLossPoints, window)
+    const history = buildPingHistory(records.filter(record => record.value >= 0), metricLossPoints, window, timing)
     const latencyValues = statsWithSamples
       .flatMap(stat => stat.valid > 0 && isFiniteNumber(stat.avg)
         ? [{ value: stat.avg, weight: stat.valid }]
@@ -844,17 +1068,29 @@ function buildStats(
       avgLoss,
       avgVolatility: weightedAverage(volatilityValues),
       history,
-      hasData: history.length > 0 || avgLatency !== null || avgLoss !== null,
+      hasData: hasHistoryData(history) || avgLatency !== null || avgLoss !== null,
     }
   }
 
   const includedTaskIds = getIncludedTaskIds(records)
 
-  if (!includedTaskIds.size)
-    return createEmptyStats()
+  if (!includedTaskIds.size) {
+    const history = buildPingHistory([], metricLossPoints, window, timing)
+    return {
+      avgLatency: null,
+      avgLoss: null,
+      avgVolatility: 0,
+      history,
+      hasData: hasHistoryData(history),
+    }
+  }
 
   const filteredRecords = records.filter(record => includedTaskIds.has(record.task_id))
-  const history = buildPingHistory(filteredRecords, undefined, window)
+  // When Metric task summaries are temporarily unavailable, the timestamped
+  // raw loss series is still authoritative telemetry. Keeping it here avoids
+  // deriving a false 0% loss value from latency-only records during a failed
+  // refresh (for example after the selected-task snapshot has been accepted).
+  const history = buildPingHistory(filteredRecords, metricLossPoints, window, timing)
   const taskRecords = new Map<number, PingRecord[]>()
 
   for (const record of filteredRecords) {
@@ -898,11 +1134,18 @@ function buildStats(
   const avgLatency = latencyValues.length
     ? average(latencyValues)
     : historyLatencyValues.length ? average(historyLatencyValues) : null
-  const avgLoss = taskLossValues.length
-    ? average(taskLossValues)
-    : historyLossValues.length ? average(historyLossValues) : null
+  const avgLoss = metricLossPoints
+    ? metricLossPoints.length
+      ? weightedAverage(metricLossPoints.map(point => ({
+          value: point.value * 100,
+          weight: point.count,
+        })))
+      : null
+    : taskLossValues.length
+      ? average(taskLossValues)
+      : historyLossValues.length ? average(historyLossValues) : null
   const avgVolatility = average(volatilityValues)
-  const hasData = history.length > 0 || avgLatency !== null || avgLoss !== null
+  const hasData = hasHistoryData(history) || avgLatency !== null || avgLoss !== null
 
   return {
     avgLatency,
@@ -915,7 +1158,8 @@ function buildStats(
 
 interface BuiltSelectedPingStats {
   stats: NodePingStatsState
-  latestSampleAt: number
+  latestSampleAt: number | null
+  hasRawSample: boolean
 }
 
 function latestPingTimestamp(values: Array<{ time: string }>): number | null {
@@ -938,6 +1182,7 @@ function buildSelectedMetricStats(
   state: SharedPingRecordsState | null,
   nodeUuid: string,
   selectedTaskId: string,
+  taskIntervalMs: number,
 ): BuiltSelectedPingStats | null {
   if (!state || state.source !== 'metric')
     return null
@@ -945,16 +1190,6 @@ function buildSelectedMetricStats(
   const metricStats = (state.metricStats ?? []).filter((stat) => {
     return stat.entity_id === nodeUuid
       && normalizeSelectedPingTaskId(stat.task_id) === selectedTaskId
-  })
-  const hasLatency = metricStats.some((stat) => {
-    return stat.total > 0
-      && stat.valid > 0
-      && (isFiniteNumber(stat.avg) || isFiniteNumber(stat.latest))
-  })
-  const hasExactLoss = metricStats.some((stat) => {
-    return stat.total > 0
-      && !stat.loss_approximate
-      && isFiniteNumber(stat.loss)
   })
   const metricLossPoints = (state.metricLossPoints ?? []).filter(point => point.taskId === selectedTaskId)
   const records = (state.recordsByClient.get(nodeUuid) ?? []).filter((record) => {
@@ -964,19 +1199,18 @@ function buildSelectedMetricStats(
       && isPingTimestampInWindow(timestamp, state.window)
       && record.value >= 0
   })
-  const hasRawLatency = records.length > 0
-  const hasRawLoss = metricLossPoints.some((point) => {
-    const timestamp = parsePingTimestampMs(point.time)
-    return timestamp !== null && isPingTimestampInWindow(timestamp, state.window)
-  })
-  if (!hasExactLoss || !hasRawLoss || (hasLatency && !hasRawLatency))
-    return null
-
-  const selectedStats = buildStats(records, metricStats, metricLossPoints, state.window)
   const latestSampleAt = latestPingTimestamp([...records, ...metricLossPoints])
-  return selectedStats.hasData && latestSampleAt !== null
-    ? { stats: selectedStats, latestSampleAt }
-    : null
+  const selectedStats = buildStats(records, metricStats, metricLossPoints, state.window, {
+    latestAcceptedSampleAt: latestSampleAt,
+    firstObservedAt: state.firstObservedAt,
+    taskIntervalMs,
+    canConfirmMissing: state.canConfirmMissing,
+  })
+  return {
+    stats: selectedStats,
+    latestSampleAt,
+    hasRawSample: records.length > 0 || metricLossPoints.length > 0,
+  }
 }
 
 function isSelectedLegacyPingRecord(value: unknown, nodeUuid: string, selectedTaskId: string): value is PingRecord {
@@ -996,6 +1230,9 @@ function buildSelectedLegacyStats(
   nodeUuid: string,
   selectedTaskId: string,
   window: PingTimeWindow,
+  taskIntervalMs: number,
+  firstObservedAt: number,
+  canConfirmMissing = true,
 ): BuiltSelectedPingStats | null {
   if (!Array.isArray(records))
     return null
@@ -1005,11 +1242,17 @@ function buildSelectedLegacyStats(
     const timestamp = parsePingTimestampMs(record.time)
     return timestamp !== null && isPingTimestampInWindow(timestamp, window)
   })
-  const selectedStats = buildStats(recordsInWindow, undefined, undefined, window)
   const latestSampleAt = latestPingTimestamp(recordsInWindow)
-  return selectedStats.hasData && latestSampleAt !== null
-    ? { stats: selectedStats, latestSampleAt }
-    : null
+  return {
+    stats: buildStats(recordsInWindow, undefined, undefined, window, {
+      latestAcceptedSampleAt: latestSampleAt,
+      firstObservedAt,
+      taskIntervalMs,
+      canConfirmMissing,
+    }),
+    latestSampleAt,
+    hasRawSample: recordsInWindow.length > 0,
+  }
 }
 
 async function loadSelectedPingTaskStats(
@@ -1018,43 +1261,119 @@ async function loadSelectedPingTaskStats(
   maxCount: number | undefined,
   selectedTaskId: string,
   window: PingTimeWindow,
+  firstObservedAt: number,
 ): Promise<SelectedPingTaskLoadResult> {
-  const catalog = await loadPublicPingTaskCatalog()
-  const task = getAssignedPublicPingTask(catalog, selectedTaskId, nodeUuid)
-  const taskIntervalMs = normalizeTaskIntervalMs(task?.interval)
-  if (!task)
-    return { snapshot: null, taskIntervalMs, bindingState: 'invalid' }
+  let catalogError: Error | null = null
+  let task: ReturnType<typeof getAssignedPublicPingTask> | undefined
+  try {
+    const catalog = await loadPublicPingTaskCatalog()
+    task = getAssignedPublicPingTask(catalog, selectedTaskId, nodeUuid)
+  }
+  catch (error) {
+    catalogError = error instanceof Error ? error : new Error('获取 Ping 任务目录失败')
+  }
 
-  const metricState = await loadPingMetricRecords(nodeUuid, hours, maxCount, window, selectedTaskId).catch(() => null)
-  const metricStats = buildSelectedMetricStats(metricState, nodeUuid, selectedTaskId)
-  if (metricStats) {
+  const taskIntervalMs = normalizeTaskIntervalMs(task?.interval)
+  if (!catalogError && !task)
+    return { snapshot: null, taskIntervalMs, bindingState: 'invalid', error: null }
+
+  let metricState: SharedPingRecordsState | null = null
+  let metricError: Error | null = null
+  try {
+    metricState = await loadPingMetricRecords(
+      nodeUuid,
+      hours,
+      maxCount,
+      window,
+      selectedTaskId,
+      firstObservedAt,
+    )
+  }
+  catch (error) {
+    metricError = error instanceof Error ? error : new Error('获取 Ping Metric 失败')
+  }
+
+  const metricStats = buildSelectedMetricStats(metricState, nodeUuid, selectedTaskId, taskIntervalMs)
+  if (metricStats?.hasRawSample) {
     return {
       snapshot: {
-        ...metricStats,
+        stats: metricStats.stats,
+        latestSampleAt: metricStats.latestSampleAt,
+        windowStart: window.start,
+        windowEnd: window.end,
+        firstObservedAt,
         fetchedAt: Date.now(),
         source: 'metric',
         taskIntervalMs,
+        canConfirmMissing: metricState?.canConfirmMissing ?? false,
         stale: false,
       },
       taskIntervalMs,
       bindingState: 'valid',
+      error: metricState?.metricQueryError ?? null,
     }
   }
 
-  const legacyRecords = await loadPingRecords(hours, maxCount, nodeUuid).catch(() => null)
-  const legacyStats = buildSelectedLegacyStats(legacyRecords, nodeUuid, selectedTaskId, window)
-  return {
-    snapshot: legacyStats
-      ? {
-          ...legacyStats,
-          fetchedAt: Date.now(),
-          source: 'legacy',
-          taskIntervalMs,
-          stale: false,
-        }
-      : null,
+  let legacyRecords: unknown = null
+  let legacySucceeded = false
+  let legacyError: Error | null = null
+  try {
+    legacyRecords = await loadPingRecords(hours, maxCount, nodeUuid)
+    legacySucceeded = true
+  }
+  catch (error) {
+    legacyError = error instanceof Error ? error : new Error('获取 Ping 历史失败')
+  }
+
+  // A cache may contain another task's real points while this selected task's
+  // fresh Metric request failed. Only a *successful current* Metric query (or
+  // a successful Legacy query) can establish that this task's empty bucket is
+  // genuinely missing.
+  const canConfirmMissing = metricState?.canConfirmMissing === true || legacySucceeded
+  const legacyStats = buildSelectedLegacyStats(
+    legacyRecords,
+    nodeUuid,
+    selectedTaskId,
+    window,
     taskIntervalMs,
-    bindingState: 'valid',
+    firstObservedAt,
+    canConfirmMissing,
+  )
+  // Metric summary fields (notably `latest`) have no timestamped history.
+  // They must never turn an otherwise empty selected binding into a synthetic
+  // value. `metricStats` is therefore only used by the early raw-sample path
+  // above; below it, a selected Legacy sample may provide the fallback, or
+  // the valid binding stays empty until a real raw observation arrives.
+  const fallbackStats = legacyStats?.hasRawSample
+    ? legacyStats
+    : legacyStats ?? {
+      stats: buildStats([], undefined, undefined, window, {
+        latestAcceptedSampleAt: null,
+        firstObservedAt,
+        taskIntervalMs,
+        canConfirmMissing,
+      }),
+      latestSampleAt: null,
+      hasRawSample: false,
+    }
+  return {
+    snapshot: {
+      stats: fallbackStats.stats,
+      latestSampleAt: fallbackStats.latestSampleAt,
+      windowStart: window.start,
+      windowEnd: window.end,
+      firstObservedAt,
+      fetchedAt: Date.now(),
+      source: legacyStats && !metricState ? 'legacy' : 'metric',
+      taskIntervalMs,
+      canConfirmMissing,
+      stale: false,
+    },
+    taskIntervalMs,
+    bindingState: catalogError ? 'unknown' : 'valid',
+    error: canConfirmMissing
+      ? null
+      : catalogError?.message ?? metricError?.message ?? legacyError?.message ?? '获取 Ping 数据失败',
   }
 }
 
@@ -1068,7 +1387,8 @@ function createSelectedPingTaskStatsEntry(
   const snapshot = persistedSnapshot
     ? {
         ...persistedSnapshot,
-        stale: Date.now() - persistedSnapshot.latestSampleAt
+        stale: persistedSnapshot.latestSampleAt !== null
+          && Date.now() - persistedSnapshot.latestSampleAt
           >= persistedSnapshot.taskIntervalMs * CACHE_CONFIG.nodePingSummary.refresh.staleAfterIntervals,
       }
     : null
@@ -1099,6 +1419,109 @@ function getSelectedPingTaskStatsEntry(
   return entry
 }
 
+function mergePingMetric(
+  currentValue: number | null,
+  currentState: PingHistoryBucketState,
+  currentSampleTime: string | null,
+  candidateValue: number | null,
+  candidateState: PingHistoryBucketState,
+  candidateSampleTime: string | null,
+): { value: number | null, state: PingHistoryBucketState, sampleTime: string | null } {
+  if (candidateState === 'data')
+    return { value: candidateValue, state: candidateState, sampleTime: candidateSampleTime }
+  if (currentState === 'data')
+    return { value: currentValue, state: currentState, sampleTime: currentSampleTime }
+  if (currentState === 'confirmed-missing' && candidateState === 'pending')
+    return { value: currentValue, state: currentState, sampleTime: null }
+  return { value: candidateValue, state: candidateState, sampleTime: null }
+}
+
+function mergePingHistory(
+  current: NodePingHistoryPoint[],
+  candidate: NodePingHistoryPoint[],
+): NodePingHistoryPoint[] {
+  const currentByTime = new Map(current.map(point => [point.time, point]))
+  return candidate.map((candidatePoint) => {
+    const currentPoint = currentByTime.get(candidatePoint.time)
+    if (!currentPoint)
+      return candidatePoint
+
+    const latency = mergePingMetric(
+      currentPoint.latency,
+      currentPoint.latencyState,
+      currentPoint.latencySampleTime,
+      candidatePoint.latency,
+      candidatePoint.latencyState,
+      candidatePoint.latencySampleTime,
+    )
+    const loss = mergePingMetric(
+      currentPoint.loss,
+      currentPoint.lossState,
+      currentPoint.lossSampleTime,
+      candidatePoint.loss,
+      candidatePoint.lossState,
+      candidatePoint.lossSampleTime,
+    )
+    return {
+      time: candidatePoint.time,
+      latency: latency.value,
+      latencySampleTime: latency.sampleTime,
+      latencyState: latency.state,
+      loss: loss.value,
+      lossSampleTime: loss.sampleTime,
+      lossState: loss.state,
+    }
+  })
+}
+
+function mergeSelectedPingTaskSnapshot(
+  current: SelectedPingTaskSnapshot,
+  candidate: SelectedPingTaskSnapshot,
+): SelectedPingTaskSnapshot {
+  const history = mergePingHistory(current.stats.history, candidate.stats.history)
+  const statsSource = candidate.stats.hasData ? candidate.stats : current.stats
+  const isSameWindow = current.windowStart === candidate.windowStart
+    && current.windowEnd === candidate.windowEnd
+  const latestSampleAt = Math.max(current.latestSampleAt ?? Number.NEGATIVE_INFINITY, candidate.latestSampleAt ?? Number.NEGATIVE_INFINITY)
+  const resolvedLatestSampleAt = Number.isFinite(latestSampleAt) ? latestSampleAt : null
+  return {
+    ...candidate,
+    latestSampleAt: resolvedLatestSampleAt,
+    firstObservedAt: isSameWindow
+      ? Math.min(current.firstObservedAt, candidate.firstObservedAt)
+      : candidate.firstObservedAt,
+    stats: {
+      ...statsSource,
+      history,
+      hasData: statsSource.hasData || hasHistoryData(history),
+    },
+    stale: resolvedLatestSampleAt !== null
+      && Date.now() - resolvedLatestSampleAt
+      >= candidate.taskIntervalMs * CACHE_CONFIG.nodePingSummary.refresh.staleAfterIntervals,
+  }
+}
+
+function hasMeaningfulSnapshotChange(
+  current: SelectedPingTaskSnapshot | null,
+  candidate: SelectedPingTaskSnapshot,
+): boolean {
+  if (!current)
+    return true
+
+  const comparable = (snapshot: SelectedPingTaskSnapshot) => ({
+    latestSampleAt: snapshot.latestSampleAt,
+    windowStart: snapshot.windowStart,
+    windowEnd: snapshot.windowEnd,
+    firstObservedAt: snapshot.firstObservedAt,
+    source: snapshot.source,
+    taskIntervalMs: snapshot.taskIntervalMs,
+    canConfirmMissing: snapshot.canConfirmMissing,
+    stale: snapshot.stale,
+    stats: snapshot.stats,
+  })
+  return JSON.stringify(comparable(current)) !== JSON.stringify(comparable(candidate))
+}
+
 async function refreshSelectedPingTaskStatsEntry(
   entry: SelectedPingTaskStatsEntry,
   nodeUuid: string,
@@ -1115,15 +1538,25 @@ async function refreshSelectedPingTaskStatsEntry(
   if (!entry.data.value)
     entry.status.value = 'loading'
 
+  const refreshWindow = getAlignedPingHistoryWindow(hours)
+  const existingSnapshot = entry.data.value
+  const firstObservedAt = existingSnapshot
+    && existingSnapshot.windowStart === refreshWindow.start
+    && existingSnapshot.windowEnd === refreshWindow.end
+    ? existingSnapshot.firstObservedAt
+    : Date.now()
+
   entry.promise = loadSelectedPingTaskStats(
     nodeUuid,
     hours,
     maxCount,
     selectedTaskId,
-    getAlignedPingHistoryWindow(hours),
+    refreshWindow,
+    firstObservedAt,
   )
     .then((result) => {
       entry.bindingState.value = result.bindingState
+      entry.error.value = result.error
       if (result.bindingState === 'invalid') {
         entry.data.value = null
         entry.status.value = 'fallback'
@@ -1135,36 +1568,33 @@ async function refreshSelectedPingTaskStatsEntry(
         }
       }
 
-      const current = entry.data.value
+      const current = entry.data.value ?? null
       const candidate = result.snapshot
       const advanced = candidate !== null
-        && (current == null || candidate.latestSampleAt > current.latestSampleAt)
+        && candidate.latestSampleAt !== null
+        && (current === null || current.latestSampleAt === null || candidate.latestSampleAt > current.latestSampleAt)
+      const nextSnapshot = candidate
+        ? current
+          ? mergeSelectedPingTaskSnapshot(current, candidate)
+          : candidate
+        : current
 
-      if (advanced && candidate) {
-        entry.data.value = candidate
+      if (nextSnapshot && hasMeaningfulSnapshotChange(current, nextSnapshot)) {
+        entry.data.value = nextSnapshot
         entry.status.value = 'ready'
-        writeSelectedStatsCache(nodeUuid, hours, maxCount, selectedTaskId, candidate)
+        if (nextSnapshot.stats.hasData)
+          writeSelectedStatsCache(nodeUuid, hours, maxCount, selectedTaskId, nextSnapshot)
       }
-      else if (current) {
-        const taskIntervalMs = result.taskIntervalMs || current.taskIntervalMs
-        const stale = Date.now() - current.latestSampleAt
-          >= taskIntervalMs * CACHE_CONFIG.nodePingSummary.refresh.staleAfterIntervals
-        if (current.stale !== stale) {
-          entry.data.value = {
-            ...current,
-            taskIntervalMs,
-            stale,
-          }
-        }
-        entry.status.value = 'ready'
+      else if (!nextSnapshot) {
+        entry.status.value = 'empty'
       }
       else {
-        entry.status.value = 'empty'
+        entry.status.value = 'ready'
       }
 
       return {
         advanced,
-        latestSampleAt: entry.data.value?.latestSampleAt ?? null,
+        latestSampleAt: nextSnapshot?.latestSampleAt ?? null,
         taskIntervalMs: result.taskIntervalMs,
       }
     })
@@ -1280,7 +1710,8 @@ export function useNodePingStats(
     releaseSelectedTaskStats = null
   })
 
-  // stats 由共享 getRecords 结果派生；共享记录每分钟刷新一次后会自动重算。
+  // Aggregate stats share the page-wide sample-aware scheduler. A newly
+  // visible sample therefore does not wait for a card-local one-minute tick.
   async function refreshAggregateStats(
     nodeUuid: string,
     hours: number,
@@ -1288,10 +1719,7 @@ export function useNodePingStats(
   ): Promise<void> {
     syncSharedRecordsSubscription(hours, maxCount, nodeUuid)
     const entry = getSharedPingRecordsEntry(hours, maxCount, nodeUuid)
-    const shouldLoadRecords = !entry.data.value
-      || Date.now() - entry.lastFetchedAt >= PING_RECORD_REFRESH_INTERVAL_MS
-
-    if (!shouldLoadRecords) {
+    if (entry.data.value) {
       loading.value = false
       error.value = null
       return
@@ -1300,7 +1728,7 @@ export function useNodePingStats(
     loading.value = !entry.data.value
     error.value = null
     try {
-      await loadSharedPingRecords(entry, hours, maxCount, nodeUuid)
+      await (entry.promise ?? refreshSharedPingRecordsEntry(entry, hours, maxCount, nodeUuid))
     }
     finally {
       loading.value = false
@@ -1318,8 +1746,18 @@ export function useNodePingStats(
 
     const records = state.recordsByClient.get(nodeUuid) ?? []
     return records.length || state.metricStats?.length
-      ? buildStats(records, state.metricStats, state.metricLossPoints, state.window)
-      : createEmptyStats()
+      ? buildStats(records, state.metricStats, state.metricLossPoints, state.window, {
+          latestAcceptedSampleAt: state.latestSampleAt,
+          firstObservedAt: state.firstObservedAt,
+          taskIntervalMs: state.taskIntervalMs,
+          canConfirmMissing: state.canConfirmMissing,
+        })
+      : buildStats([], undefined, undefined, state.window, {
+          latestAcceptedSampleAt: state.latestSampleAt,
+          firstObservedAt: state.firstObservedAt,
+          taskIntervalMs: state.taskIntervalMs,
+          canConfirmMissing: state.canConfirmMissing,
+        })
   }
 
   function readRetainedSelectedTaskStats(
@@ -1355,7 +1793,7 @@ export function useNodePingStats(
 
       if (!configuredTaskId) {
         const aggregateStats = buildAggregateStats(nodeUuid, hours, maxCount)
-        return aggregateStats.hasData
+        return aggregateStats.history.length
           ? aggregateStats
           : readStatsCache(nodeUuid, hours, maxCount) ?? createEmptyStats()
       }
@@ -1369,7 +1807,7 @@ export function useNodePingStats(
     // entry.data 这个 shallowRef 建立响应式依赖——即便首次加载尚未返回。
     if (!configuredTaskId) {
       const aggregateStats = buildAggregateStats(nodeUuid, hours, maxCount)
-      return aggregateStats.hasData
+      return aggregateStats.history.length
         ? aggregateStats
         : readStatsCache(nodeUuid, hours, maxCount) ?? createEmptyStats()
     }
