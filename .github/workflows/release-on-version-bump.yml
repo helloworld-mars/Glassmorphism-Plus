@@ -1,9 +1,9 @@
-name: Release On Version Bump
+name: Manual Release
 
+# Source synchronization must never create a tag or GitHub Release implicitly.
+# A maintainer may dispatch this workflow explicitly after separately approving a release.
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 permissions:
   contents: write

@@ -20,8 +20,8 @@ export interface NodePingHistoryPoint {
 }
 
 export interface NodePingStatsState {
-  avgLatency: number
-  avgLoss: number
+  avgLatency: number | null
+  avgLoss: number | null
   avgVolatility: number
   history: NodePingHistoryPoint[]
   hasData: boolean
@@ -80,14 +80,17 @@ interface SelectedPingTaskSnapshot {
 interface SelectedPingTaskLoadResult {
   snapshot: SelectedPingTaskSnapshot | null
   taskIntervalMs: number
-  bindingValid: boolean
+  bindingState: SelectedPingTaskBindingState
 }
+
+type SelectedPingTaskBindingState = 'unknown' | 'valid' | 'invalid'
 
 interface SelectedPingTaskStatsEntry {
   data: ReturnType<typeof shallowRef<SelectedPingTaskSnapshot | null>>
   loading: ReturnType<typeof ref<boolean>>
   error: ReturnType<typeof ref<string | null>>
-  status: ReturnType<typeof ref<'idle' | 'loading' | 'ready' | 'fallback'>>
+  status: ReturnType<typeof ref<'idle' | 'loading' | 'ready' | 'empty' | 'fallback'>>
+  bindingState: ReturnType<typeof ref<SelectedPingTaskBindingState>>
   promise: Promise<PingRefreshOutcome> | null
   subscribers: number
 }
@@ -95,8 +98,8 @@ interface SelectedPingTaskStatsEntry {
 const HISTORY_BUCKET_COUNT = CACHE_CONFIG.nodePingSummary.historyBucketCount
 const CACHE_VERSION = 9
 const CACHE_KEY_PREFIX = 'komari-theme-emerald:node-ping-stats'
-const SELECTED_CACHE_VERSION = 1
-const SELECTED_CACHE_QUERY_VERSION = 'metric-window-v1'
+const SELECTED_CACHE_VERSION = 2
+const SELECTED_CACHE_QUERY_VERSION = 'metric-window-v2'
 const SELECTED_CACHE_KEY_PREFIX = 'komari-theme-emerald:selected-node-ping-stats'
 const FULL_LOSS_EPSILON = 1e-6
 const PING_RECORD_REFRESH_INTERVAL_MS = CACHE_CONFIG.nodePingSummary.refreshInterval
@@ -121,8 +124,8 @@ interface TaskRecordSummary {
 
 function createEmptyStats(): NodePingStatsState {
   return {
-    avgLatency: 0,
-    avgLoss: 0,
+    avgLatency: null,
+    avgLoss: null,
     avgVolatility: 0,
     history: [],
     hasData: false,
@@ -146,6 +149,10 @@ function weightedAverage(values: Array<{ value: number, weight: number }>): numb
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
+}
+
+function isNullableFiniteNumber(value: unknown): value is number | null {
+  return value === null || isFiniteNumber(value)
 }
 
 function normalizeSelectedPingTaskId(value: unknown): string | null {
@@ -242,8 +249,8 @@ function isValidStatsState(value: unknown): value is NodePingStatsState {
     return false
 
   const state = value as Record<string, unknown>
-  return typeof state.avgLatency === 'number'
-    && typeof state.avgLoss === 'number'
+  return isNullableFiniteNumber(state.avgLatency)
+    && isNullableFiniteNumber(state.avgLoss)
     && typeof state.avgVolatility === 'number'
     && typeof state.hasData === 'boolean'
     && Array.isArray(state.history)
@@ -583,10 +590,12 @@ async function loadPingMetricRecords(
       .filter(stat => stat.total > 0 && !stat.loss_approximate && isFiniteNumber(stat.loss))
       .map(stat => normalizeTaskId(stat.task_id)),
   )
-  const hasCompleteLossSeries = exactLossTaskIds.size > 0
-    && [...exactLossTaskIds].every(taskId => metricLossTaskIds.has(taskId))
-  const hasCompleteLatencySeries = exactLatencyTaskIds.size > 0
-    && [...exactLatencyTaskIds].every(taskId => metricLatencyTaskIds.has(taskId))
+  const hasCompleteLossSeries = selectedTaskId
+    ? exactLossTaskIds.size > 0 && metricLossPoints.length > 0
+    : exactLossTaskIds.size > 0 && [...exactLossTaskIds].every(taskId => metricLossTaskIds.has(taskId))
+  const hasCompleteLatencySeries = selectedTaskId
+    ? exactLatencyTaskIds.size === 0 || metricRecords.length > 0
+    : exactLatencyTaskIds.size > 0 && [...exactLatencyTaskIds].every(taskId => metricLatencyTaskIds.has(taskId))
   if (!hasCompleteLatencySeries || !hasCompleteLossSeries)
     return null
 
@@ -825,14 +834,17 @@ function buildStats(
       .filter(stat => stat.valid > 0 && isFiniteNumber(stat.p99_p50_ratio))
       .map(stat => ({ value: stat.p99_p50_ratio!, weight: stat.valid }))
 
-    const avgLoss = weightedAverage(lossValues)
+    const avgLatency = latencyValues.length
+      ? weightedAverage(latencyValues)
+      : latestLatencyValues.length ? average(latestLatencyValues) : null
+    const avgLoss = lossValues.length ? weightedAverage(lossValues) : null
 
     return {
-      avgLatency: latencyValues.length ? weightedAverage(latencyValues) : average(latestLatencyValues),
+      avgLatency,
       avgLoss,
       avgVolatility: weightedAverage(volatilityValues),
       history,
-      hasData: true,
+      hasData: history.length > 0 || avgLatency !== null || avgLoss !== null,
     }
   }
 
@@ -883,10 +895,14 @@ function buildStats(
     .map(point => point.loss)
     .filter(isFiniteNumber)
 
-  const avgLatency = latencyValues.length ? average(latencyValues) : average(historyLatencyValues)
-  const avgLoss = taskLossValues.length ? average(taskLossValues) : average(historyLossValues)
+  const avgLatency = latencyValues.length
+    ? average(latencyValues)
+    : historyLatencyValues.length ? average(historyLatencyValues) : null
+  const avgLoss = taskLossValues.length
+    ? average(taskLossValues)
+    : historyLossValues.length ? average(historyLossValues) : null
   const avgVolatility = average(volatilityValues)
-  const hasData = history.length > 0 || latencyValues.length > 0 || taskLossValues.length > 0
+  const hasData = history.length > 0 || avgLatency !== null || avgLoss !== null
 
   return {
     avgLatency,
@@ -953,15 +969,12 @@ function buildSelectedMetricStats(
     const timestamp = parsePingTimestampMs(point.time)
     return timestamp !== null && isPingTimestampInWindow(timestamp, state.window)
   })
-  if (!hasLatency || !hasExactLoss || !hasRawLatency || !hasRawLoss)
+  if (!hasExactLoss || !hasRawLoss || (hasLatency && !hasRawLatency))
     return null
 
   const selectedStats = buildStats(records, metricStats, metricLossPoints, state.window)
   const latestSampleAt = latestPingTimestamp([...records, ...metricLossPoints])
-  return selectedStats.hasData
-    && Number.isFinite(selectedStats.avgLatency)
-    && Number.isFinite(selectedStats.avgLoss)
-    && latestSampleAt !== null
+  return selectedStats.hasData && latestSampleAt !== null
     ? { stats: selectedStats, latestSampleAt }
     : null
 }
@@ -992,15 +1005,9 @@ function buildSelectedLegacyStats(
     const timestamp = parsePingTimestampMs(record.time)
     return timestamp !== null && isPingTimestampInWindow(timestamp, window)
   })
-  if (!recordsInWindow.some(record => record.value >= 0))
-    return null
-
   const selectedStats = buildStats(recordsInWindow, undefined, undefined, window)
   const latestSampleAt = latestPingTimestamp(recordsInWindow)
-  return selectedStats.hasData
-    && Number.isFinite(selectedStats.avgLatency)
-    && Number.isFinite(selectedStats.avgLoss)
-    && latestSampleAt !== null
+  return selectedStats.hasData && latestSampleAt !== null
     ? { stats: selectedStats, latestSampleAt }
     : null
 }
@@ -1016,7 +1023,7 @@ async function loadSelectedPingTaskStats(
   const task = getAssignedPublicPingTask(catalog, selectedTaskId, nodeUuid)
   const taskIntervalMs = normalizeTaskIntervalMs(task?.interval)
   if (!task)
-    return { snapshot: null, taskIntervalMs, bindingValid: false }
+    return { snapshot: null, taskIntervalMs, bindingState: 'invalid' }
 
   const metricState = await loadPingMetricRecords(nodeUuid, hours, maxCount, window, selectedTaskId).catch(() => null)
   const metricStats = buildSelectedMetricStats(metricState, nodeUuid, selectedTaskId)
@@ -1030,7 +1037,7 @@ async function loadSelectedPingTaskStats(
         stale: false,
       },
       taskIntervalMs,
-      bindingValid: true,
+      bindingState: 'valid',
     }
   }
 
@@ -1047,7 +1054,7 @@ async function loadSelectedPingTaskStats(
         }
       : null,
     taskIntervalMs,
-    bindingValid: true,
+    bindingState: 'valid',
   }
 }
 
@@ -1070,6 +1077,7 @@ function createSelectedPingTaskStatsEntry(
     loading: ref(false),
     error: ref<string | null>(null),
     status: ref(snapshot ? 'ready' : 'idle'),
+    bindingState: ref(snapshot ? 'valid' : 'unknown'),
     promise: null,
     subscribers: 0,
   }
@@ -1115,7 +1123,8 @@ async function refreshSelectedPingTaskStatsEntry(
     getAlignedPingHistoryWindow(hours),
   )
     .then((result) => {
-      if (!result.bindingValid) {
+      entry.bindingState.value = result.bindingState
+      if (result.bindingState === 'invalid') {
         entry.data.value = null
         entry.status.value = 'fallback'
         removeSelectedStatsCache(nodeUuid, hours, maxCount, selectedTaskId)
@@ -1150,7 +1159,7 @@ async function refreshSelectedPingTaskStatsEntry(
         entry.status.value = 'ready'
       }
       else {
-        entry.status.value = 'fallback'
+        entry.status.value = 'empty'
       }
 
       return {
@@ -1161,7 +1170,7 @@ async function refreshSelectedPingTaskStatsEntry(
     })
     .catch((err): PingRefreshOutcome => {
       entry.error.value = err instanceof Error ? err.message : 'èŽ·å– Ping åŽ†å²å¤±è´¥'
-      entry.status.value = entry.data.value ? 'ready' : 'fallback'
+      entry.status.value = entry.data.value ? 'ready' : 'empty'
       return {
         advanced: false,
         latestSampleAt: entry.data.value?.latestSampleAt ?? null,
@@ -1339,7 +1348,9 @@ export function useNodePingStats(
     if (!entry || entry.status.value === 'loading' || entry.status.value === 'idle')
       return createEmptyStats()
 
-    return buildAggregateStats(nodeUuid, hours, maxCount)
+    return entry.bindingState.value === 'invalid'
+      ? buildAggregateStats(nodeUuid, hours, maxCount)
+      : createEmptyStats()
   })
 
   // 副作用：按需触发首次共享加载并维护 loading/error，不再命令式写入 stats。
@@ -1401,15 +1412,15 @@ export function useNodePingStats(
       releaseSelectedTaskStats = retained.release
       let cancelled = false
       const stopFallbackWatch = watch(
-        [retained.entry.status, retained.entry.data],
-        async ([status, snapshot]) => {
+        [retained.entry.status, retained.entry.data, retained.entry.bindingState],
+        async ([status, snapshot, bindingState]) => {
           if (cancelled)
             return
           if (snapshot) {
             syncSharedRecordsSubscription(null)
             return
           }
-          if (status !== 'fallback')
+          if (status !== 'fallback' || bindingState !== 'invalid')
             return
 
           try {

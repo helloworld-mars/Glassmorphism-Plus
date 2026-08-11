@@ -29,26 +29,26 @@ coverage
 
 .eslintcache
 
-.env.development
-
-# Local configuration and credentials
+# Local environment and credentials
 .env
 .env.*
+!.env.example
+
+# Packages, captures, certificates, and local data
+*.zip
+*.har
 *.pem
 *.key
-*.pfx
 *.p12
+*.pfx
 *.crt
 *.cer
-
-# Local data and captured traffic
-*.har
 *.sqlite
 *.sqlite3
 *.db
 
-# Release archives are published separately, never committed to main
-*.zip
+# Local agent handoff state
+AICACHE.md
 
 # Cypress
 /cypress/videos/

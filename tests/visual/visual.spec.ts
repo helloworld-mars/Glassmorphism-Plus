@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { expect, test } from '@playwright/test'
+import { comparePingTaskOrder, createPingTaskOrderMap, orderPingTasksByBackend } from '../../src/utils/metricSeries'
 import { createPingTimeWindow, getPingTimeBucketIndex, parsePingTimestampMs } from '../../src/utils/pingTime'
 import { installKomariFixture, PRIMARY_NODE_UUID } from './fixtures/komari'
 
@@ -80,6 +81,21 @@ test('Ping timestamps use one strict [start, end) twenty-bucket contract', () =>
   expect(getPingTimeBucketIndex(end, window)).toBeNull()
 })
 
+test('Ping task displays retain the raw public task order instead of weight or numeric ID order', () => {
+  const publicTasks = [{ id: 30 }, { id: 10 }, { id: 20 }]
+  const taskOrder = createPingTaskOrderMap(publicTasks)
+  const metricSeries = [
+    { id: 20, tags: { task_id: '20' } },
+    { id: 30, tags: { task_id: '30' } },
+    { id: 10, tags: { task_id: '10' } },
+  ]
+
+  expect([...metricSeries].sort((left, right) => comparePingTaskOrder(left.tags, right.tags, taskOrder)).map(item => item.id))
+    .toEqual([30, 10, 20])
+  expect(orderPingTasksByBackend([...metricSeries, { id: 5, tags: { task_id: '5' } }], publicTasks).map(item => item.id))
+    .toEqual([30, 10, 20, 5])
+})
+
 test('brand metadata and homepage footer retain current and original attribution', async ({ page }) => {
   const themeManifest = JSON.parse(readFileSync(new URL('../../komari-theme.json', import.meta.url), 'utf8')) as Record<string, unknown>
   const packageMetadata = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as Record<string, unknown>
@@ -89,13 +105,13 @@ test('brand metadata and homepage footer retain current and original attribution
     name: 'Komari Glassmorphism Plus',
     short: 'glassmorphism-plus',
     description: 'A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.',
-    version: '1.2.1',
+    version: '1.3.0',
     author: 'helloworld-mars',
     url: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(packageMetadata).toMatchObject({
     name: 'komari-theme-glassmorphism-plus',
-    version: '1.2.1',
+    version: '1.3.0',
     homepage: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(themeManifest.short).toMatch(/^[\w-]+$/)
@@ -125,7 +141,7 @@ test('brand metadata and homepage footer retain current and original attribution
 
   const footer = page.locator('footer')
   await expect(footer.getByRole('link', { name: 'Glassmorphism Plus' })).toHaveAttribute('href', 'https://github.com/helloworld-mars/Glassmorphism-Plus')
-  await expect(footer.getByText('v1.2 · helloworld-mars', { exact: true }).first()).toBeVisible()
+  await expect(footer.getByText('v1.3.0 · helloworld-mars', { exact: true }).first()).toBeVisible()
   await expect(footer.getByRole('link', { name: 'Based on the original theme by sanrokamlan' }))
     .toHaveAttribute('href', 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism')
   await expect(footer).not.toContainText('unknown')
@@ -234,6 +250,32 @@ test('home mini card metric icons remain accessible', async ({ page }) => {
   await expect(card.getByRole('img', { name: '内存' })).toBeVisible()
 })
 
+test('node card expiry uses red through 5 days and yellow through 10 days', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await installKomariFixture(page, { expiryThresholds: true, hideEarth: true })
+  await openStablePage(page)
+
+  const criticalCard = primaryNodeCard(page)
+  const warningCard = page.getByRole('button', { name: '查看节点 香港边缘节点-超长名称布局测试 详情' })
+  const criticalExpiry = criticalCard.getByText('剩余', { exact: true }).locator('..')
+  const warningExpiry = warningCard.getByText('剩余', { exact: true }).locator('..')
+
+  await expect(criticalExpiry).toContainText('剩余5天')
+  await expect(criticalExpiry).toHaveClass(/text-destructive/)
+  await expect(warningExpiry).toContainText('剩余10天')
+  await expect(warningExpiry).toHaveClass(/text-warning/)
+})
+
+test('node card renders an invalid expiry as a muted unknown value', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await installKomariFixture(page, { invalidExpiry: true, hideEarth: true })
+  await openStablePage(page)
+
+  const unknownExpiry = primaryNodeCard(page).locator('.text-muted-foreground').filter({ hasText: /^-$/ })
+  await expect(unknownExpiry).toHaveCount(1)
+  await expect(unknownExpiry).toBeVisible()
+})
+
 test('free node pricing stays semantic across home, finance, and detail', async ({ page }) => {
   const freeNodeName = '主控-洛杉矶'
   const freeNodeUuid = '00000000-0000-4000-8000-000000000001'
@@ -277,6 +319,21 @@ test('detail dark mobile', async ({ page }) => {
   await openStablePage(page, '/instance/00000000-0000-4000-8000-000000000002')
   await expect(page.getByText('硬件信息')).toBeVisible()
   await expect(page).toHaveScreenshot('detail-dark-mobile.png', { fullPage: false })
+})
+
+test('detail short history falls back when metric history omits CPU', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await installKomariFixture(page, { missingCpuMetricHistory: true })
+  await openStablePage(page, '/instance/00000000-0000-4000-8000-000000000001')
+
+  const cpuValue = page.locator('[data-load-chart-card="cpu"] [data-latest-cpu]')
+  const loadRange = page.getByRole('tablist').first()
+  // The preset tabs are fixed as realtime, 4h, 1d, 7d, 30d, custom. Indexing
+  // avoids coupling this regression test to the host browser's text decoding.
+  for (const tabIndex of [1, 2]) {
+    await loadRange.getByRole('tab').nth(tabIndex).click()
+    await expect(cpuValue).toHaveText(/^\d+\.\d$/)
+  }
 })
 
 test('detail ping requests stay scoped to the current node', async ({ page }) => {
@@ -363,7 +420,8 @@ test.describe('node-card per-node ping task bindings', () => {
     await expect.poll(() => calls.filter(call => call.method === 'public:queryMetrics' && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202').length).toBe(12)
 
     expect(calls.filter(call => call.method === 'public:getPublicPingTasks')).toHaveLength(1)
-    expect(calls.filter(call => call.method === 'public:getPingMetricStats' && call.params.task_id === undefined)).toHaveLength(0)
+    expect(calls.filter(call => call.method === 'public:getPingMetricStats'
+      && call.params.task_id === undefined)).toHaveLength(0)
     expect(calls.filter(call => call.method === 'public:queryMetrics' && isPingMetricQuery(call.params) && !(call.params.tags as Record<string, unknown> | undefined)?.task_id)).toHaveLength(0)
     expect(calls.filter(isPingLegacyRequest)).toHaveLength(0)
   })
@@ -407,7 +465,8 @@ test.describe('node-card per-node ping task bindings', () => {
 
     expect(calls.filter(call => call.method === 'public:getPublicPingTasks')).toHaveLength(2)
     expect(calls.filter(isPingLegacyRequest)).toHaveLength(0)
-    expect(calls.filter(call => call.method === 'public:getPingMetricStats' && call.params.task_id === undefined)).toHaveLength(0)
+    expect(calls.filter(call => call.method === 'public:getPingMetricStats'
+      && call.params.task_id === undefined)).toHaveLength(0)
     expect(calls.filter(call => call.method === 'public:queryMetrics'
       && isPingMetricQuery(call.params)
       && !(call.params.tags as Record<string, unknown> | undefined)?.task_id)).toHaveLength(0)
@@ -695,11 +754,12 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectNodeCardPing(page, '200 ms', '25.0%')
 
     await expect.poll(() => calls.filter(isPingLegacyRequest).length).toBe(1)
-    expect(calls.filter(call => call.method === 'public:getPingMetricStats' && call.params.task_id === undefined)).toHaveLength(0)
+    expect(calls.filter(call => call.method === 'public:getPingMetricStats'
+      && call.params.task_id === undefined)).toHaveLength(0)
     expect(calls.filter(call => call.method === 'public:queryMetrics' && isPingMetricQuery(call.params) && !(call.params.tags as Record<string, unknown> | undefined)?.task_id)).toHaveLength(0)
   })
 
-  test('selected Metric and Legacy failure fall back to the aggregate exactly once per node', async ({ page }) => {
+  test('selected Metric and Legacy failures keep each valid binding empty without querying the aggregate', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
       if (!request.url().endsWith('/api/rpc2'))
@@ -715,11 +775,12 @@ test.describe('node-card per-node ping task bindings', () => {
       nodeCardPingFixture: { metric: 'error', legacy: 'selected-empty' },
     })
     await openStablePage(page)
-    await expectNodeCardPing(page, '10 ms', '0.0%')
+    await expectNodeCardPing(page, '-', '-')
 
-    await expect.poll(() => calls.filter(isPingLegacyRequest).length).toBe(24)
-    expect(calls.filter(call => call.method === 'public:getPingMetricStats' && call.params.task_id === undefined)).toHaveLength(12)
-    expect(calls.filter(call => call.method === 'public:queryMetrics' && isPingMetricQuery(call.params) && !(call.params.tags as Record<string, unknown> | undefined)?.task_id)).toHaveLength(12)
+    await expect.poll(() => calls.filter(isPingLegacyRequest).length).toBe(12)
+    expect(calls.filter(call => call.method === 'public:getPingMetricStats'
+      && call.params.task_id === undefined)).toHaveLength(0)
+    expect(calls.filter(call => call.method === 'public:queryMetrics' && isPingMetricQuery(call.params) && !(call.params.tags as Record<string, unknown> | undefined)?.task_id)).toHaveLength(0)
   })
 
   for (const sampleCount of [1, 4, 10, 20, 48, 150]) {
@@ -798,7 +859,7 @@ test.describe('node-card per-node ping task bindings', () => {
     expect(calls.filter(call => call.method === 'public:queryMetrics' && call.params.entity_id === PRIMARY_NODE_UUID && isPingMetricQuery(call.params) && !(call.params.tags as Record<string, unknown> | undefined)?.task_id)).toHaveLength(0)
   })
 
-  test('falls back to the aggregate only after stats.latest-only Metric and selected Legacy both lack history', async ({ page }) => {
+  test('keeps a valid binding empty when stats lack selected history and Legacy also lacks data', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
       if (!request.url().endsWith('/api/rpc2'))
@@ -814,10 +875,10 @@ test.describe('node-card per-node ping task bindings', () => {
       nodeCardPingFixture: { metric: 'valid', metricQueryOmitTaskIds: [202], legacy: 'selected-empty' },
     })
     await openStablePage(page)
-    await expectNodeCardPing(page, '10 ms', '0.0%')
-    await expect.poll(() => calls.filter(call => isPingLegacyRequest(call) && call.params.uuid === PRIMARY_NODE_UUID).length).toBe(2)
-    expect(calls.filter(call => call.method === 'public:getPingMetricStats' && call.params.entity_id === PRIMARY_NODE_UUID && call.params.task_id === undefined)).toHaveLength(1)
-    expect(calls.filter(call => call.method === 'public:queryMetrics' && call.params.entity_id === PRIMARY_NODE_UUID && isPingMetricQuery(call.params) && !(call.params.tags as Record<string, unknown> | undefined)?.task_id)).toHaveLength(1)
+    await expectNodeCardPing(page, '-', '-')
+    await expect.poll(() => calls.filter(call => isPingLegacyRequest(call) && call.params.uuid === PRIMARY_NODE_UUID).length).toBe(1)
+    expect(calls.filter(call => call.method === 'public:getPingMetricStats' && call.params.entity_id === PRIMARY_NODE_UUID && call.params.task_id === undefined)).toHaveLength(0)
+    expect(calls.filter(call => call.method === 'public:queryMetrics' && call.params.entity_id === PRIMARY_NODE_UUID && isPingMetricQuery(call.params) && !(call.params.tags as Record<string, unknown> | undefined)?.task_id)).toHaveLength(0)
   })
 
   test('empty setting retains the all-task aggregate and does not request a task catalog', async ({ page }) => {
@@ -880,6 +941,86 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectNodeCardPingTooltip(page, 'loss', '0.0%')
   })
 
+  test('a valid 100% loss Metric binding keeps latency empty, uses only its task, and recovers automatically', async ({ page }) => {
+    const calls: Array<{ method: string, params: Record<string, unknown> }> = []
+    page.on('request', (request) => {
+      if (!request.url().endsWith('/api/rpc2'))
+        return
+      const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
+      if (payload?.method)
+        calls.push({ method: payload.method, params: payload.params ?? {} })
+    })
+
+    await page.setViewportSize({ width: 1280, height: 720 })
+    const fixture = await installKomariFixture(page, {
+      fakeTimers: true,
+      nodeCardPingTaskBindings: primaryBinding(202),
+      nodeCardPingFixture: {
+        metric: 'valid',
+        task202Latency: null,
+        task202Loss: 100,
+        sampleTimes: ['2026-07-25T12:00:00.000Z'],
+      },
+    })
+    await openStablePage(page)
+
+    await expectNodeCardPing(page, '-', '100.0%')
+    await expect(primaryNodeCard(page).locator('[data-node-ping-bars="latency"] [role="tooltip"]')).toHaveCount(20)
+    await expect(primaryNodeCard(page).locator('[data-node-ping-bars="loss"] [role="tooltip"]')).toHaveCount(20)
+    expect(calls.filter(call => call.method === 'public:getPingMetricStats' && call.params.task_id === '202')).toHaveLength(1)
+    expect(calls.filter(call => call.method === 'public:queryMetrics'
+      && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202')).toHaveLength(1)
+    expect(calls.filter(call => call.method === 'public:getPingMetricStats'
+      && call.params.entity_id === PRIMARY_NODE_UUID
+      && call.params.task_id === undefined)).toHaveLength(0)
+    expect(calls.filter(call => call.method === 'public:queryMetrics'
+      && isPingMetricQuery(call.params)
+      && call.params.entity_id === PRIMARY_NODE_UUID
+      && !(call.params.tags as Record<string, unknown> | undefined)?.task_id)).toHaveLength(0)
+    expect(calls.filter(isPingLegacyRequest)).toHaveLength(0)
+
+    fixture.setNodeCardPingFixture({
+      task202Latency: 17,
+      task202Loss: 0,
+      sampleTimes: ['2026-07-25T12:00:00.000Z', '2026-07-25T12:01:00.000Z'],
+    })
+    await fixture.advanceTime(65_000)
+    await expectNodeCardPing(page, '17 ms', '0.0%')
+    await expect.poll(() => calls.filter(call => call.method === 'public:queryMetrics'
+      && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202').length).toBe(2)
+    expect(calls.filter(call => call.method === 'public:getPingMetricStats'
+      && call.params.entity_id === PRIMARY_NODE_UUID
+      && call.params.task_id === undefined)).toHaveLength(0)
+  })
+
+  test('selected Legacy full-loss records keep a valid binding task-scoped when Metric requests fail', async ({ page }) => {
+    const calls: Array<{ method: string, params: Record<string, unknown> }> = []
+    page.on('request', (request) => {
+      if (!request.url().endsWith('/api/rpc2'))
+        return
+      const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
+      if (payload?.method)
+        calls.push({ method: payload.method, params: payload.params ?? {} })
+    })
+
+    await page.setViewportSize({ width: 1280, height: 720 })
+    await installKomariFixture(page, {
+      nodeCardPingTaskBindings: primaryBinding(202),
+      nodeCardPingFixture: { metric: 'error', legacy: 'valid', task202Latency: null, task202Loss: 100 },
+    })
+    await openStablePage(page)
+
+    await expectNodeCardPing(page, '-', '100.0%')
+    await expect.poll(() => calls.filter(call => isPingLegacyRequest(call) && call.params.uuid === PRIMARY_NODE_UUID).length).toBe(1)
+    expect(calls.filter(call => call.method === 'public:getPingMetricStats'
+      && call.params.entity_id === PRIMARY_NODE_UUID
+      && call.params.task_id === undefined)).toHaveLength(0)
+    expect(calls.filter(call => call.method === 'public:queryMetrics'
+      && isPingMetricQuery(call.params)
+      && call.params.entity_id === PRIMARY_NODE_UUID
+      && !(call.params.tags as Record<string, unknown> | undefined)?.task_id)).toHaveLength(0)
+  })
+
   test('invalid task ID falls back to the original all-task aggregate', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 })
     await installKomariFixture(page, {
@@ -913,7 +1054,16 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectNodeCardPing(page, '91 ms', '12.5%')
   })
 
-  test('task with no Metric or Legacy data falls back to the original aggregate', async ({ page }) => {
+  test('task with no Metric or Legacy data remains empty when its binding is valid', async ({ page }) => {
+    const calls: Array<{ method: string, params: Record<string, unknown> }> = []
+    page.on('request', (request) => {
+      if (!request.url().endsWith('/api/rpc2'))
+        return
+      const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
+      if (payload?.method)
+        calls.push({ method: payload.method, params: payload.params ?? {} })
+    })
+
     await page.setViewportSize({ width: 1280, height: 720 })
     await installKomariFixture(page, {
       nodeCardPingTaskBindings: primaryBinding(202),
@@ -921,7 +1071,14 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page)
 
-    await expectNodeCardPing(page, '10 ms', '0.0%')
+    await expectNodeCardPing(page, '-', '-')
+    expect(calls.filter(call => call.method === 'public:getPingMetricStats'
+      && call.params.entity_id === PRIMARY_NODE_UUID
+      && call.params.task_id === undefined)).toHaveLength(0)
+    expect(calls.filter(call => call.method === 'public:queryMetrics'
+      && isPingMetricQuery(call.params)
+      && call.params.entity_id === PRIMARY_NODE_UUID
+      && !(call.params.tags as Record<string, unknown> | undefined)?.task_id)).toHaveLength(0)
   })
 
   test('uses selected Legacy records when selected Metric requests fail', async ({ page }) => {
@@ -937,7 +1094,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectNodeCardPingTooltip(page, 'loss', '100.0%')
   })
 
-  test('falls back to original Legacy aggregate when selected Metric and Legacy data are unavailable', async ({ page }) => {
+  test('keeps a valid binding empty when selected Metric and Legacy data are unavailable', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 })
     await installKomariFixture(page, {
       nodeCardPingTaskBindings: primaryBinding(202),
@@ -945,10 +1102,10 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page)
 
-    await expectNodeCardPing(page, '10 ms', '0.0%')
+    await expectNodeCardPing(page, '-', '-')
   })
 
-  test('malformed selected Metric data falls back without accepting mismatched task data', async ({ page }) => {
+  test('malformed selected Metric data stays empty without accepting mismatched or aggregate task data', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 })
     await installKomariFixture(page, {
       nodeCardPingTaskBindings: primaryBinding(202),
@@ -956,7 +1113,7 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page)
 
-    await expectNodeCardPing(page, '10 ms', '0.0%')
+    await expectNodeCardPing(page, '-', '-')
   })
 
   test('changing task IDs cannot render a previous selected task from persistent cache', async ({ page }) => {

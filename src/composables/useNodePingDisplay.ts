@@ -124,33 +124,37 @@ export function useNodePingDisplay(
   const lossRenderBars = computed(() => lossBars.value.length ? lossBars.value : buildEmptyPingBars('loss'))
 
   const latencyDisplay = computed(() => {
-    if (pingStats.hasData.value)
-      return `${Math.round(pingStats.avgLatency.value)} ms`
-    if (pingStats.loading.value)
+    const avgLatency = pingStats.avgLatency.value
+    if (typeof avgLatency === 'number' && Number.isFinite(avgLatency))
+      return `${Math.round(avgLatency)} ms`
+    if (pingStats.loading.value && !pingStats.hasData.value)
       return options.loadingDisplayText ?? '加载中'
     return options.emptyDisplayText ?? '-'
   })
 
   const lossDisplay = computed(() => {
-    if (pingStats.hasData.value)
-      return `${pingStats.avgLoss.value.toFixed(1)}%`
-    if (pingStats.loading.value)
+    const avgLoss = pingStats.avgLoss.value
+    if (typeof avgLoss === 'number' && Number.isFinite(avgLoss))
+      return `${avgLoss.toFixed(1)}%`
+    if (pingStats.loading.value && !pingStats.hasData.value)
       return options.loadingDisplayText ?? '加载中'
     return options.emptyDisplayText ?? '-'
   })
 
   const latencyPanelTooltip = computed(() => {
-    if (!pingStats.hasData.value) {
-      if (pingStats.loading.value)
+    const avgLatency = pingStats.avgLatency.value
+    if (typeof avgLatency !== 'number' || !Number.isFinite(avgLatency)) {
+      if (pingStats.loading.value && !pingStats.hasData.value)
         return options.loadingPanelTooltipText?.latency ?? ''
       return options.emptyPanelTooltipText?.latency ?? ''
     }
-    return `平均延迟 ${Math.round(pingStats.avgLatency.value)} ms`
+    return `平均延迟 ${Math.round(avgLatency)} ms`
   })
 
   const lossPanelTooltip = computed(() => {
-    if (!pingStats.hasData.value) {
-      if (pingStats.loading.value)
+    const avgLoss = pingStats.avgLoss.value
+    if (typeof avgLoss !== 'number' || !Number.isFinite(avgLoss)) {
+      if (pingStats.loading.value && !pingStats.hasData.value)
         return options.loadingPanelTooltipText?.loss ?? ''
       return options.emptyPanelTooltipText?.loss ?? ''
     }
@@ -158,7 +162,7 @@ export function useNodePingDisplay(
     const volatility = pingStats.avgVolatility.value > 0
       ? `，平均波动 ${pingStats.avgVolatility.value.toFixed(2)}`
       : ''
-    return `平均丢包 ${pingStats.avgLoss.value.toFixed(1)}%${volatility}`
+    return `平均丢包 ${avgLoss.toFixed(1)}%${volatility}`
   })
 
   return {

@@ -391,8 +391,8 @@ export interface PingMetricTaskStats {
   loss_approximate?: boolean
   min?: number
   max?: number
-  avg?: number
-  latest?: number
+  avg?: number | null
+  latest?: number | null
   p50?: number
   p99?: number
   stddev?: number

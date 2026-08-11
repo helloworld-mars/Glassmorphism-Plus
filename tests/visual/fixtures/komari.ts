@@ -23,6 +23,9 @@ export interface VisualFixtureOptions {
   nodeCardSize?: 'mini' | 'compact' | 'comfortable' | 'large'
   freePriceNode?: boolean
   hideEarth?: boolean
+  expiryThresholds?: boolean
+  invalidExpiry?: boolean
+  missingCpuMetricHistory?: boolean
   nodeCardPingTaskBindings?: string
   nodeCardPingFixture?: NodeCardPingFixture
   clockNow?: string
@@ -43,7 +46,7 @@ export interface NodeCardPingFixture {
   metricQueryOmitTaskIds?: number[]
   task202Exists?: boolean
   task202Assigned?: boolean
-  task202Latency?: number
+  task202Latency?: number | null
   task202Loss?: number
   /** Sanitized shape observed in Komari 1.4.1 HAR responses. */
   komari141HarShape?: boolean
@@ -189,7 +192,7 @@ function buildNodeCardPingRecords(uuid: string, fixture: NodeCardPingFixture): A
   if (fixture.legacy === 'selected-empty' || fixture.legacyEmptyUuids?.includes(uuid))
     return records
 
-  const latency = fixture.task202Latency ?? 200
+  const latency = fixture.task202Latency === undefined ? 200 : fixture.task202Latency
   const loss = fixture.task202Loss ?? 25
   const lostCount = loss > 0 ? Math.min(points.length, Math.max(0, Math.round(loss / 25))) : 0
   return [
@@ -198,7 +201,7 @@ function buildNodeCardPingRecords(uuid: string, fixture: NodeCardPingFixture): A
       task_id: 202,
       client: uuid,
       time: point.time,
-      value: point.index < lostCount ? -1 : latency,
+      value: point.index < lostCount || latency === null ? -1 : latency,
     })),
   ]
 }
@@ -213,7 +216,9 @@ function buildNodeCardPingMetricResponse(payload: Record<string, unknown>, fixtu
       return []
 
     return taskIds.map((taskId) => {
-      const latency = taskId === 202 ? fixture.task202Latency ?? 200 : 10
+      const latency = taskId === 202
+        ? fixture.task202Latency === undefined ? 200 : fixture.task202Latency
+        : 10
       const loss = taskId === 202 ? (fixture.task202Loss ?? 25) / 100 : 0
       return {
         metric_key: metricKey,
@@ -239,7 +244,9 @@ function buildNodeCardPingMetricStats(payload: Record<string, unknown>, fixture:
   const taskIds = getFixturePingTaskIds(payload, fixture)
   const sampleCount = fixture.sampleTimes?.length ?? Math.max(1, Math.floor(fixture.sampleCount ?? 4))
   const stats = taskIds.map((taskId) => {
-    const latency = taskId === 202 ? fixture.task202Latency ?? 200 : 10
+    const latency = taskId === 202
+      ? fixture.task202Latency === undefined ? 200 : fixture.task202Latency
+      : 10
     const loss = taskId === 202 ? fixture.task202Loss ?? 25 : 0
     return {
       entity_id: uuid,
@@ -257,7 +264,7 @@ function buildNodeCardPingMetricStats(payload: Record<string, unknown>, fixture:
   return { start: FIXED_NOW, end: FIXED_NOW, interval_seconds: 60, stats, count: stats.length }
 }
 
-function buildClients(freePriceNode = false) {
+function buildClients(freePriceNode = false, expiryThresholds = false, invalidExpiry = false) {
   return Object.fromEntries(Array.from({ length: 12 }, (_, index) => {
     const fixture = REGION_FIXTURES[index % REGION_FIXTURES.length]
     const uuid = uuidFor(index)
@@ -285,7 +292,13 @@ function buildClients(freePriceNode = false) {
       billing_cycle: 365,
       auto_renewal: index % 2 === 0,
       currency: 'USD',
-      expired_at: index === 6 ? '2026-08-02T00:00:00.000Z' : '2027-07-25T00:00:00.000Z',
+      expired_at: invalidExpiry && index === 0
+        ? 'not-a-valid-date'
+        : expiryThresholds && index === 0
+          ? '2026-07-30T12:00:00.000Z'
+          : expiryThresholds && index === 1
+            ? '2026-08-04T12:00:00.000Z'
+            : index === 6 ? '2026-08-02T00:00:00.000Z' : '2027-07-25T00:00:00.000Z',
       group: index < 6 ? '生产' : '测试,边缘',
       tags: index % 2 === 0 ? 'core<jade>,visual<blue>' : 'edge<orange>',
       hidden: false,
@@ -419,14 +432,14 @@ function metricValue(key: string, index: number): number {
   return values[key] ?? 0
 }
 
-function buildMetricResponse(payload: Record<string, unknown>) {
+function buildMetricResponse(payload: Record<string, unknown>, missingCpuMetricHistory = false) {
   const requested = Array.isArray(payload.metric_keys) ? payload.metric_keys.map(String) : METRIC_KEYS
   const uuid = typeof payload.entity_id === 'string' ? payload.entity_id : uuidFor(0)
   const points = Array.from({ length: 48 }, (_, index) => ({
     time: new Date(Date.parse(FIXED_NOW) - (47 - index) * 75_000).toISOString(),
     index,
   }))
-  const series = requested.map(key => ({
+  const series = requested.filter(key => !missingCpuMetricHistory || key !== 'cpu.usage').map(key => ({
     metric_key: key,
     entity_id: uuid,
     type: 'gauge',
@@ -468,6 +481,7 @@ async function handleRpc(
   clientFixtures = clients,
   nodeCardPingFixture?: NodeCardPingFixture,
   pingResponseGate?: PingResponseGate,
+  missingCpuMetricHistory = false,
 ): Promise<void> {
   const payload = route.request().postDataJSON() as { id: unknown, method: string, params?: Record<string, unknown> }
   const uuid = typeof payload.params?.uuid === 'string' ? payload.params.uuid : uuidFor(0)
@@ -538,7 +552,7 @@ async function handleRpc(
         }
       }
       else {
-        result = buildMetricResponse(payload.params ?? {})
+        result = buildMetricResponse(payload.params ?? {}, missingCpuMetricHistory)
       }
       break
     case 'public:getPingMetricStats':
@@ -582,7 +596,9 @@ async function handleRpc(
 }
 
 export async function installKomariFixture(page: Page, options: VisualFixtureOptions = {}): Promise<KomariFixtureController> {
-  const clientFixtures = options.freePriceNode ? buildClients(true) : clients
+  const clientFixtures = options.freePriceNode || options.expiryThresholds || options.invalidExpiry
+    ? buildClients(options.freePriceNode, options.expiryThresholds, options.invalidExpiry)
+    : clients
   const pingResponseGate = createPingResponseGate()
   let nodeCardPingFixture = options.nodeCardPingFixture
   const adminAccess = options.adminAccess ?? 'guest'
@@ -677,7 +693,13 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     contentType: 'application/json',
     body: JSON.stringify({ status: 'success', message: 'ok', data: { version: '1.2.6-visual', hash: 'visual' } }),
   }))
-  await page.route('**/rpc2', route => handleRpc(route, clientFixtures, nodeCardPingFixture, pingResponseGate))
+  await page.route('**/rpc2', route => handleRpc(
+    route,
+    clientFixtures,
+    nodeCardPingFixture,
+    pingResponseGate,
+    options.missingCpuMetricHistory ?? false,
+  ))
   await page.route('**/api/admin/ping', async (route) => {
     if (adminAccess !== 'admin') {
       await route.fulfill({

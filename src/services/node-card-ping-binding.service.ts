@@ -1,6 +1,8 @@
 import type { PublicSettings } from '@/utils/api'
 import type { NodeCardPingTaskBindings } from '@/utils/nodeCardPingBindings'
+import { loadPublicPingTasks } from '@/services/metrics.service'
 import { requestManager } from '@/services/request.service'
+import { orderPingTasksByBackend } from '@/utils/metricSeries'
 import {
   isNodeCardPingBindingUuid,
   isNodeCardPingTaskId,
@@ -117,7 +119,11 @@ function normalizeAdminPingTasks(value: unknown): AdminPingTask[] {
       target: typeof item.target === 'string' && item.target.trim() ? item.target.trim() : '未提供目标',
       weight: typeof item.weight === 'number' && Number.isFinite(item.weight) ? item.weight : Number.MAX_SAFE_INTEGER,
     }]
-  }).sort((left, right) => left.weight - right.weight || left.id - right.id)
+  })
+}
+
+function orderAdminPingTasksByPublic(tasks: AdminPingTask[], publicTasks: readonly { id: number }[]): AdminPingTask[] {
+  return publicTasks.length ? orderPingTasksByBackend(tasks, publicTasks) : tasks
 }
 
 function normalizeAdminClients(value: unknown): AdminPingClient[] {
@@ -192,15 +198,16 @@ export async function loadNodeCardPingBindingAdminData(): Promise<NodeCardPingBi
     // other management request is issued, so a known non-admin cannot receive
     // or trigger the rest of the manager data flow.
     const tasks = await loadFreshAdminPingTasks(signal)
-    const [publicSettings, clients] = await Promise.all([
+    const [publicSettings, clients, publicTasks] = await Promise.all([
       loadFreshPublicSettings(signal),
       loadFreshAdminClients(signal),
+      loadPublicPingTasks().catch(() => []),
     ])
     return {
       theme: publicSettings.theme,
       publicSettings,
       settings: themeSettingsFromPublicSettings(publicSettings),
-      tasks,
+      tasks: orderAdminPingTasksByPublic(tasks, publicTasks),
       clients,
     }
   })
@@ -211,16 +218,18 @@ export async function saveNodeCardPingTaskBindings(options: SaveNodeCardPingBind
     throw new NodeCardPingBindingApiError('未找到当前主题名称')
 
   return runAdminRequest('node-card-ping-bindings:save', async (signal) => {
-    const [publicSettings, tasks, clients] = await Promise.all([
+    const [publicSettings, tasks, clients, publicTasks] = await Promise.all([
       loadFreshPublicSettings(signal),
       loadFreshAdminPingTasks(signal),
       loadFreshAdminClients(signal),
+      loadPublicPingTasks().catch(() => []),
     ])
+    const orderedTasks = orderAdminPingTasksByPublic(tasks, publicTasks)
     const freshSettings = themeSettingsFromPublicSettings(publicSettings)
     if (publicSettings.theme !== options.theme)
       throw new NodeCardPingBindingApiError('当前主题已切换，请重新打开绑定页面后再保存')
     const originalBindings = parseNodeCardPingTaskBindings(freshSettings[NODE_CARD_PING_BINDINGS_SETTING_KEY])
-    const nextBindings = { ...pruneNodeCardPingTaskBindings(originalBindings, clients, tasks) }
+    const nextBindings = { ...pruneNodeCardPingTaskBindings(originalBindings, clients, orderedTasks) }
 
     if (options.selectedNodeUuid) {
       const nodeUuid = options.selectedNodeUuid.toLowerCase()
@@ -230,7 +239,7 @@ export async function saveNodeCardPingTaskBindings(options: SaveNodeCardPingBind
       if (options.selectedTaskId === undefined) {
         delete nextBindings[nodeUuid]
       }
-      else if (isNodeCardPingTaskId(options.selectedTaskId) && hasAssignedTask(tasks, nodeUuid, options.selectedTaskId)) {
+      else if (isNodeCardPingTaskId(options.selectedTaskId) && hasAssignedTask(orderedTasks, nodeUuid, options.selectedTaskId)) {
         nextBindings[nodeUuid] = options.selectedTaskId
       }
       else {
@@ -257,10 +266,10 @@ export async function saveNodeCardPingTaskBindings(options: SaveNodeCardPingBind
 
     return {
       bindings: verifiedBindings,
-      prunedCount: Object.keys(originalBindings).length - Object.keys(pruneNodeCardPingTaskBindings(originalBindings, clients, tasks)).length,
+      prunedCount: Object.keys(originalBindings).length - Object.keys(pruneNodeCardPingTaskBindings(originalBindings, clients, orderedTasks)).length,
       publicSettings: verifiedPublicSettings,
       settings: verifiedSettings,
-      tasks,
+      tasks: orderedTasks,
       clients,
     }
   })

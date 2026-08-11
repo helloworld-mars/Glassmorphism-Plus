@@ -14,10 +14,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { CACHE_CONFIG } from '@/constants/cache'
 import { PING_RECORD_MAX_COUNT } from '@/constants/load'
 import { loadPingRecordsWithTasks } from '@/services/history.service'
-import { loadPingMetricStats, queryMetrics } from '@/services/metrics.service'
+import { loadPingMetricStats, loadPublicPingTasks, queryMetrics } from '@/services/metrics.service'
 import { useAppStore } from '@/stores/app'
 import { ACCESSIBLE_LINE_TYPES, getChartSeriesPalette } from '@/utils/chartPalette'
-import { isPingMetric, normalizeMetricSeriesList, PING_LATENCY_METRIC, pingTaskId, pingTaskName } from '@/utils/metricSeries'
+import { isPingMetric, normalizeMetricSeriesList, orderPingTasksByBackend, PING_LATENCY_METRIC, pingTaskId, pingTaskName } from '@/utils/metricSeries'
 import { createNextAlignedPingTimeWindow, createPingTimeWindow, isPingTimestampInWindow, parsePingTimestampMs } from '@/utils/pingTime'
 import { cutPeakValues, interpolateNullsLinear } from '@/utils/recordHelper'
 import '@/utils/echarts' // 共享 ECharts 配置
@@ -224,8 +224,8 @@ function normalizeMetricTask(stat: PingMetricTaskStats): PingTaskInfo {
     loss: stat.loss,
     min: stat.min,
     max: stat.max,
-    avg: stat.avg,
-    latest: stat.latest,
+    avg: typeof stat.avg === 'number' && Number.isFinite(stat.avg) ? stat.avg : undefined,
+    latest: typeof stat.latest === 'number' && Number.isFinite(stat.latest) ? stat.latest : undefined,
     p50: stat.p50,
     p99: stat.p99,
     p99_p50_ratio: stat.p99_p50_ratio,
@@ -291,7 +291,7 @@ async function loadMetricPingPayload(
     end: new Date(window.end).toISOString(),
   }
 
-  const [statsResult, metricsResult] = await Promise.allSettled([
+  const [statsResult, metricsResult, publicTasksResult] = await Promise.allSettled([
     loadPingMetricStats({ entity_id: nodeUuid, ...metricRangeParams, max_points: PING_RECORD_MAX_COUNT }),
     queryMetrics({
       metric_keys: [PING_LATENCY_METRIC],
@@ -302,6 +302,7 @@ async function loadMetricPingPayload(
       max_points: PING_RECORD_MAX_COUNT,
       aggregation: 'avg',
     }),
+    loadPublicPingTasks(),
   ])
 
   const metricStats = statsResult.status === 'fulfilled'
@@ -344,9 +345,13 @@ async function loadMetricPingPayload(
     })
   }
 
+  const publicTasks = publicTasksResult.status === 'fulfilled'
+    ? publicTasksResult.value
+    : []
+
   return {
     records: metricRecords,
-    tasks: [...taskMap.values()],
+    tasks: orderPingTasksByBackend([...taskMap.values()], publicTasks),
   }
 }
 
@@ -403,7 +408,9 @@ async function fetchRecords() {
     records.sort((a, b) => (parsePingTimestampMs(a.time) ?? 0) - (parsePingTimestampMs(b.time) ?? 0))
 
     remoteData.value = records
-    tasks.value = result.tasks
+    tasks.value = metricPayload
+      ? result.tasks
+      : orderPingTasksByBackend(result.tasks, await loadPublicPingTasks().catch(() => []))
 
     if (tasks.value.length > 0 && selectedTaskIds.value.length === 0) {
       selectedTaskIds.value = tasks.value.map(t => t.id)
@@ -676,10 +683,7 @@ const pingChartOption = computed(() => {
         let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
         html += '<div style="display:flex;flex-direction:column;gap:4px">'
 
-        // 按延迟值排序显示
-        const sortedParams = [...p].sort((a, b) => (a.value ?? 0) - (b.value ?? 0))
-
-        for (const item of sortedParams) {
+        for (const item of p) {
           if (item.value !== null && item.value !== undefined) {
             // 通过任务名找到对应的任务ID，再获取颜色
             const task = tasks.value.find(t => t.name === item.seriesName)
