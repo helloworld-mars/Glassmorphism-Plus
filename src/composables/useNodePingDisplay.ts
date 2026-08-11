@@ -15,6 +15,7 @@ export interface NodePingBar {
 
 interface UseNodePingDisplayOptions {
   enabled?: MaybeRefOrGetter<boolean>
+  retainSnapshotWhenDisabled?: MaybeRefOrGetter<boolean>
   selectedTaskId?: MaybeRefOrGetter<string | number | undefined>
   loadingDisplayText?: string
   emptyDisplayText?: string
@@ -54,12 +55,18 @@ export function useNodePingDisplay(
 ) {
   const appStore = useAppStore()
 
-  const pingStatsEnabled = computed(() => {
-    if (toValue(options.enabled) === false)
-      return false
+  const pingRecordAvailable = computed(() => {
     if (appStore.publicSettings?.record_enabled === false)
       return false
     return appStore.publicSettings?.ping_record_preserve_time !== 0
+  })
+
+  const pingStatsEnabled = computed(() => toValue(options.enabled) !== false && pingRecordAvailable.value)
+
+  const retainSnapshotWhenDisabled = computed(() => {
+    return toValue(options.retainSnapshotWhenDisabled) === true
+      && toValue(options.enabled) === false
+      && pingRecordAvailable.value
   })
 
   const pingStatsHours = computed(() => {
@@ -72,6 +79,7 @@ export function useNodePingDisplay(
   const pingStats = useNodePingStats(uuid, {
     hours: pingStatsHours,
     enabled: pingStatsEnabled,
+    retainSnapshotWhenDisabled,
     maxCount: PING_SUMMARY_MAX_COUNT,
     selectedTaskId: options.selectedTaskId,
   })

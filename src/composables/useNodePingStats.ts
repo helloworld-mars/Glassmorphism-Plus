@@ -1223,6 +1223,7 @@ export function useNodePingStats(
   options?: {
     hours?: MaybeRefOrGetter<number>
     enabled?: MaybeRefOrGetter<boolean>
+    retainSnapshotWhenDisabled?: MaybeRefOrGetter<boolean>
     maxCount?: MaybeRefOrGetter<number | undefined>
     selectedTaskId?: MaybeRefOrGetter<string | number | undefined>
   },
@@ -1247,6 +1248,7 @@ export function useNodePingStats(
       maxCount,
       cacheKey: getSharedPingRecordsKey(hours, maxCount, toValue(uuid)),
       enabled: toValue(options?.enabled) ?? true,
+      retainSnapshotWhenDisabled: toValue(options?.retainSnapshotWhenDisabled) ?? false,
       configuredTaskId,
       selectedTaskId: normalizeSelectedPingTaskId(configuredTaskId),
     }
@@ -1320,10 +1322,48 @@ export function useNodePingStats(
       : createEmptyStats()
   }
 
+  function readRetainedSelectedTaskStats(
+    nodeUuid: string,
+    hours: number,
+    maxCount: number | undefined,
+    selectedTaskId: string,
+  ): NodePingStatsState {
+    const selectedTaskKey = getSelectedPingTaskStatsKey(nodeUuid, hours, maxCount, selectedTaskId)
+    const entry = selectedTaskEntryKey.value === selectedTaskKey
+      ? selectedTaskEntry.value
+      : getSelectedPingTaskStatsEntry(nodeUuid, hours, maxCount, selectedTaskId)
+
+    return entry?.data.value?.stats ?? createEmptyStats()
+  }
+
   const stats = computed<NodePingStatsState>(() => {
-    const { uuid: nodeUuid, hours, maxCount, enabled, configuredTaskId, selectedTaskId } = resolved.value
-    if (!enabled || !nodeUuid.trim())
+    const {
+      uuid: nodeUuid,
+      hours,
+      maxCount,
+      enabled,
+      retainSnapshotWhenDisabled,
+      configuredTaskId,
+      selectedTaskId,
+    } = resolved.value
+    if (!nodeUuid.trim())
       return createEmptyStats()
+
+    if (!enabled) {
+      if (!retainSnapshotWhenDisabled)
+        return createEmptyStats()
+
+      if (!configuredTaskId) {
+        const aggregateStats = buildAggregateStats(nodeUuid, hours, maxCount)
+        return aggregateStats.hasData
+          ? aggregateStats
+          : readStatsCache(nodeUuid, hours, maxCount) ?? createEmptyStats()
+      }
+
+      return selectedTaskId
+        ? readRetainedSelectedTaskStats(nodeUuid, hours, maxCount, selectedTaskId)
+        : buildAggregateStats(nodeUuid, hours, maxCount)
+    }
 
     // 通过 getSharedPingRecordsEntry 读取（不存在则创建），确保 computed 始终对
     // entry.data 这个 shallowRef 建立响应式依赖——即便首次加载尚未返回。

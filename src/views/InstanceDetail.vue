@@ -530,7 +530,7 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
           </Button>
           <select
             :value="data.uuid"
-            class="h-7 max-w-34 rounded-sm border-0 bg-transparent px-1 text-xs text-foreground outline-none sm:max-w-48"
+            class="detail-node-select h-7 max-w-34 rounded-sm border-0 bg-transparent px-1 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/60 sm:max-w-48"
             aria-label="切换节点"
             @change="selectDetailNode"
           >

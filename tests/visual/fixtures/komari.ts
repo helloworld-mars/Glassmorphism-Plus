@@ -34,6 +34,7 @@ export interface VisualFixtureOptions {
   adminAccess?: 'admin' | 'guest' | 'forbidden'
   hidePingTaskBindingEntry?: boolean
   siteName?: string
+  disablePageAnimation?: boolean
 }
 
 export interface NodeCardPingFixture {
@@ -617,7 +618,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     colorVisionMode: options.colorVisionFriendly ? '色觉友好' : '标准',
     hideAdminEntryWhenLoggedOut: false,
     hidePriceWhenLoggedOut: false,
-    disablePageAnimation: true,
+    disablePageAnimation: options.disablePageAnimation ?? true,
     homeQuickControlsEnabled: true,
     homeQuickControlPreset: '完整',
     homeToolsEnabled: true,

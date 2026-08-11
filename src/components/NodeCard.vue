@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
-import { computed } from 'vue'
+import { useElementSize } from '@vueuse/core'
+import { computed, ref } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { CardX } from '@/components/ui/card-x'
 import { DataTooltip } from '@/components/ui/data-tooltip'
@@ -67,6 +68,10 @@ const nodeCardMetricBoxClass = computed(() => isMiniNodeCard.value
   : appStore.nodeCardSize === 'compact' ? 'px-1.5 py-1.5' : 'px-2 py-1.5')
 const nodeCardPanelClass = computed(() => appStore.nodeCardSize === 'large' ? 'h-14' : appStore.nodeCardSize === 'comfortable' ? 'h-12' : isMiniNodeCard.value ? 'h-7' : 'h-11')
 const nodeCardPingPanelClass = computed(() => isMiniNodeCard.value ? 'gap-1 p-1' : 'gap-1.5 p-2')
+const latencyPingBarsRef = ref<HTMLDivElement>()
+const lossPingBarsRef = ref<HTMLDivElement>()
+const { width: latencyPingBarsWidth } = useElementSize(latencyPingBarsRef)
+const { width: lossPingBarsWidth } = useElementSize(lossPingBarsRef)
 
 const formatBytes = (bytes: number) => formatBytesWithConfig(bytes, appStore.byteDecimals)
 const formatBytesPerSecond = (bytes: number) => formatBytesPerSecondWithConfig(bytes, appStore.byteDecimals)
@@ -92,8 +97,31 @@ const {
   lossPanelTooltip,
 } = useNodePingDisplay(() => props.node.uuid, {
   enabled: () => props.pingEnabled,
+  retainSnapshotWhenDisabled: true,
   selectedTaskId: () => getNodeCardPingTaskId(appStore.nodeCardPingTaskBindings, props.node.uuid),
 })
+
+function getPingBarGridStyle(width: number, barCount: number): Record<string, string> {
+  if (!barCount)
+    return {}
+
+  const availableWidth = Math.floor(width)
+  const gapCount = Math.max(0, barCount - 1)
+  const barWidth = Math.floor((availableWidth - gapCount) / barCount)
+  if (barWidth < 1) {
+    return {
+      gridTemplateColumns: `repeat(${barCount}, minmax(0, 1fr))`,
+    }
+  }
+
+  return {
+    gridTemplateColumns: `repeat(${barCount}, ${barWidth}px)`,
+    justifyContent: 'center',
+  }
+}
+
+const latencyPingBarGridStyle = computed(() => getPingBarGridStyle(latencyPingBarsWidth.value, latencyRenderBars.value.length))
+const lossPingBarGridStyle = computed(() => getPingBarGridStyle(lossPingBarsWidth.value, lossRenderBars.value.length))
 
 const trafficUsedPercentage = computed(() => getTrafficUsedPercentage(props.node))
 const trafficUsed = computed(() => getTrafficUsed(props.node))
@@ -466,13 +494,15 @@ function hasRegion(region: string | null | undefined): boolean {
               <span class="font-medium">{{ latencyDisplay }}</span>
             </div>
             <div
+              ref="latencyPingBarsRef"
               data-node-ping-bars="latency"
               class="grid min-h-0 min-w-0 w-full flex-1 items-end gap-[1px] opacity-80 group-hover/panel:opacity-100"
-              :style="{ gridTemplateColumns: `repeat(${latencyRenderBars.length}, minmax(0, 1fr))` }"
+              :style="latencyPingBarGridStyle"
             >
               <DataTooltip
                 v-for="bar in latencyRenderBars" :key="bar.key"
-                placement="top" :content="bar.tooltip" class="h-full w-full"
+                data-node-ping-bar
+                placement="top" :content="bar.tooltip" class="h-full min-w-0 w-full"
               >
                 <span
                   class="block h-full w-full rounded-[1px] transition-transform duration-150 group-hover/data-tooltip:scale-y-160 group-hover/panel:opacity-60 group-hover/data-tooltip:!opacity-100"
@@ -495,13 +525,15 @@ function hasRegion(region: string | null | undefined): boolean {
               <span class="font-medium">{{ lossDisplay }}</span>
             </div>
             <div
+              ref="lossPingBarsRef"
               data-node-ping-bars="loss"
               class="grid min-h-0 min-w-0 w-full flex-1 items-end gap-[1px] opacity-80 group-hover/panel:opacity-100"
-              :style="{ gridTemplateColumns: `repeat(${lossRenderBars.length}, minmax(0, 1fr))` }"
+              :style="lossPingBarGridStyle"
             >
               <DataTooltip
                 v-for="bar in lossRenderBars" :key="bar.key"
-                placement="top" :content="bar.tooltip" class="h-full w-full"
+                data-node-ping-bar
+                placement="top" :content="bar.tooltip" class="h-full min-w-0 w-full"
               >
                 <span
                   class="block h-full w-full rounded-[1px] transition-transform duration-150 group-hover/data-tooltip:scale-y-160 group-hover/panel:opacity-60 group-hover/data-tooltip:!opacity-100"

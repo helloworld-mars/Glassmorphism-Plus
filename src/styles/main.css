@@ -155,6 +155,36 @@
   }
 }
 
+/* Keep the native detail-node menu in the same color scheme as the active theme.
+   Browsers render <option> popups outside the normal glass surface, so the select
+   needs explicit native-control and fallback option colors rather than relying on
+   inherited text alone. */
+.detail-node-select {
+  color: var(--glass-light-text, var(--color-foreground));
+  background-color: transparent;
+  color-scheme: light;
+}
+
+.detail-node-select option {
+  color: var(--glass-light-text, var(--color-popover-foreground));
+  background-color: var(--glass-light-card, var(--color-popover));
+}
+
+.dark .detail-node-select {
+  color: var(--glass-dark-text, var(--color-foreground));
+  color-scheme: dark;
+}
+
+.dark .detail-node-select option {
+  color: var(--glass-dark-text, var(--color-popover-foreground));
+  background-color: var(--glass-dark-card, var(--color-popover));
+}
+
+.detail-node-select option:checked {
+  color: var(--primary-foreground);
+  background-color: var(--selection);
+}
+
 /* iOS 15.4-16.3 can run the app but lacks Tailwind v4's modern color stack. */
 html.legacy-webkit {
   --background: #e8edf4;

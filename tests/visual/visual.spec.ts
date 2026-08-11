@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { expect, test } from '@playwright/test'
 import { comparePingTaskOrder, createPingTaskOrderMap, orderPingTasksByBackend } from '../../src/utils/metricSeries'
@@ -56,6 +56,46 @@ async function expectNodeCardPingTooltip(page: Page, metric: 'latency' | 'loss',
   await expect.poll(async () => (await tooltips.allTextContents()).some(content => content.includes(text))).toBe(true)
 }
 
+async function readNodeCardPingBarGeometry(card: Locator, metric: 'latency' | 'loss') {
+  return card.locator(`[data-node-ping-bars="${metric}"]`).evaluate((element) => {
+    const strip = element.getBoundingClientRect()
+    const bars = Array.from(element.querySelectorAll<HTMLElement>(':scope > [data-node-ping-bar]')).map((bar) => {
+      const rect = bar.getBoundingClientRect()
+      return { left: rect.left, right: rect.right, width: rect.width }
+    })
+    return {
+      left: strip.left,
+      right: strip.right,
+      bars,
+    }
+  })
+}
+
+async function expectUniformNodeCardPingBars(card: Locator): Promise<void> {
+  for (const metric of ['latency', 'loss'] as const) {
+    await expect.poll(async () => {
+      const geometry = await readNodeCardPingBarGeometry(card, metric)
+      if (geometry.bars.length !== 20)
+        return false
+
+      const [first] = geometry.bars
+      if (!first || Math.abs(first.width - Math.round(first.width)) > 0.01)
+        return false
+
+      return geometry.bars.every((bar, index) => {
+        const previous = geometry.bars[index - 1]
+        return Math.abs(bar.width - first.width) <= 0.01
+          && (index === 0 || Math.abs(bar.left - previous!.right - 1) <= 0.01)
+      })
+    }).toBe(true)
+
+    const geometry = await readNodeCardPingBarGeometry(card, metric)
+    expect(geometry.bars).toHaveLength(20)
+    expect(geometry.bars[0]!.left).toBeGreaterThanOrEqual(geometry.left - 0.01)
+    expect(geometry.bars.at(-1)!.right).toBeLessThanOrEqual(geometry.right + 0.01)
+  }
+}
+
 test('Ping timestamps use one strict [start, end) twenty-bucket contract', () => {
   const start = Date.parse('2026-07-25T19:59:00.000Z')
   const end = Date.parse('2026-07-25T20:59:00.000Z')
@@ -105,13 +145,13 @@ test('brand metadata and homepage footer retain current and original attribution
     name: 'Komari Glassmorphism Plus',
     short: 'glassmorphism-plus',
     description: 'A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.',
-    version: '1.3.0',
+    version: '1.3.1',
     author: 'helloworld-mars',
     url: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(packageMetadata).toMatchObject({
     name: 'komari-theme-glassmorphism-plus',
-    version: '1.3.0',
+    version: '1.3.1',
     homepage: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(themeManifest.short).toMatch(/^[\w-]+$/)
@@ -141,7 +181,7 @@ test('brand metadata and homepage footer retain current and original attribution
 
   const footer = page.locator('footer')
   await expect(footer.getByRole('link', { name: 'Glassmorphism Plus' })).toHaveAttribute('href', 'https://github.com/helloworld-mars/Glassmorphism-Plus')
-  await expect(footer.getByText('v1.3.0 · helloworld-mars', { exact: true }).first()).toBeVisible()
+  await expect(footer.getByText('v1.3.1 · helloworld-mars', { exact: true }).first()).toBeVisible()
   await expect(footer.getByRole('link', { name: 'Based on the original theme by sanrokamlan' }))
     .toHaveAttribute('href', 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism')
   await expect(footer).not.toContainText('unknown')
@@ -321,6 +361,48 @@ test('detail dark mobile', async ({ page }) => {
   await expect(page).toHaveScreenshot('detail-dark-mobile.png', { fullPage: false })
 })
 
+for (const scenario of [
+  { name: 'dark', dark: true, expectedColorScheme: 'dark' },
+  { name: 'light', dark: false, expectedColorScheme: 'light' },
+]) {
+  test(`detail node selector keeps its native ${scenario.name} popup palette readable`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    await installKomariFixture(page, { dark: scenario.dark })
+    await openStablePage(page, `/instance/${PRIMARY_NODE_UUID}`)
+
+    const selector = page.getByLabel('切换节点')
+    const styles = await selector.evaluate((element) => {
+      const select = element as HTMLSelectElement
+      const option = select.options.item(1)
+      if (!option)
+        throw new Error('fixture must provide another detail node')
+
+      const selectStyle = getComputedStyle(select)
+      const optionStyle = getComputedStyle(option)
+      return {
+        tagName: select.tagName,
+        optionCount: select.options.length,
+        colorScheme: selectStyle.colorScheme,
+        selectColor: selectStyle.color,
+        optionColor: optionStyle.color,
+        optionBackground: optionStyle.backgroundColor,
+      }
+    })
+
+    expect(styles.tagName).toBe('SELECT')
+    expect(styles.optionCount).toBeGreaterThan(1)
+    expect(styles.colorScheme).toBe(scenario.expectedColorScheme)
+    expect(styles.selectColor).not.toBe(styles.optionBackground)
+    expect(styles.optionColor).not.toBe(styles.optionBackground)
+    expect(styles.optionBackground).not.toBe('rgba(0, 0, 0, 0)')
+
+    await selector.focus()
+    await expect(selector).toBeFocused()
+    await selector.selectOption({ index: 1 })
+    await expect(page).toHaveURL(`/instance/00000000-0000-4000-8000-000000000002`)
+  })
+}
+
 test('detail short history falls back when metric history omits CPU', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   await installKomariFixture(page, { missingCpuMetricHistory: true })
@@ -399,6 +481,79 @@ function isPingLegacyRequest(call: { method: string, params: Record<string, unkn
 }
 
 test.describe('node-card per-node ping task bindings', () => {
+  test('keeps an exact selected-task snapshot visible throughout the home-to-detail leave transition', async ({ page }) => {
+    const selectedTaskQueries: Array<Record<string, unknown>> = []
+    page.on('request', (request) => {
+      if (!request.url().endsWith('/api/rpc2'))
+        return
+
+      const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
+      const taskId = (payload?.params?.tags as Record<string, unknown> | undefined)?.task_id
+      if (payload?.method === 'public:queryMetrics' && taskId === '202')
+        selectedTaskQueries.push(payload.params ?? {})
+    })
+
+    await page.setViewportSize({ width: 1280, height: 720 })
+    await installKomariFixture(page, {
+      disablePageAnimation: false,
+      nodeCardPingTaskBindings: primaryBinding(202),
+      nodeCardPingFixture: { metric: 'valid' },
+    })
+    await page.goto('/')
+    await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
+    await expectNodeCardPing(page, '200 ms', '25.0%')
+    await expectNodeCardPingTooltip(page, 'latency', '200 ms')
+
+    await page.addStyleTag({ content: '.duration-150 { transition-duration: 1000ms !important; }' })
+    selectedTaskQueries.length = 0
+    await primaryNodeCard(page).click()
+    await expect(page).toHaveURL(`/instance/${PRIMARY_NODE_UUID}`)
+    await expect(primaryNodeCard(page)).toBeVisible()
+    await expectNodeCardPing(page, '200 ms', '25.0%')
+    await expectNodeCardPingTooltip(page, 'latency', '200 ms')
+    await expectUniformNodeCardPingBars(primaryNodeCard(page))
+
+    await page.evaluate(() => window.dispatchEvent(new Event('online')))
+    await page.waitForTimeout(300)
+    expect(selectedTaskQueries).toHaveLength(0)
+    await expect(page.getByText('硬件信息')).toBeVisible()
+  })
+
+  test('quantizes all twenty NodeCard Ping bars across desktop, mobile, empty, loading, and offline states', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    const fixture = await installKomariFixture(page, {
+      nodeCardPingTaskBindings: allNodeBindings(202),
+      nodeCardPingFixture: { metric: 'valid' },
+    })
+    await openStablePage(page)
+
+    const primaryCard = primaryNodeCard(page)
+    await expectUniformNodeCardPingBars(primaryCard)
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expectUniformNodeCardPingBars(primaryCard)
+
+    const offlineCard = page.getByRole('button', { name: '查看节点 伦敦-离线归档 详情' })
+    await expectUniformNodeCardPingBars(offlineCard)
+
+    const resumePingResponses = fixture.pausePingResponses()
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
+    await expectUniformNodeCardPingBars(primaryNodeCard(page))
+    resumePingResponses()
+  })
+
+  test('keeps the twenty-bar geometry when a valid selected binding has no samples', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    await installKomariFixture(page, {
+      nodeCardPingTaskBindings: primaryBinding(202),
+      nodeCardPingFixture: { metric: 'selected-empty', legacy: 'selected-empty' },
+    })
+    await openStablePage(page)
+    await expectNodeCardPing(page, '-', '-')
+    await expectUniformNodeCardPingBars(primaryNodeCard(page))
+  })
+
   test('12 valid bindings load one task catalog and only their selected Metric pairs', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
@@ -629,6 +784,36 @@ test.describe('node-card per-node ping task bindings', () => {
     await expect.poll(() => selectedQueries().length).toBe(4)
     await expectNodeCardPing(page, '9 ms', '0.0%')
     await expectNodeCardPingTooltip(page, 'latency', '23:03:00\n9 ms')
+  })
+
+  test('keeps an accepted selected-task snapshot when its next refresh fails', async ({ page }) => {
+    const calls: Array<{ method: string, params: Record<string, unknown> }> = []
+    const selectedMetricQueryCount = () => calls.filter(call => call.method === 'public:queryMetrics'
+      && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202').length
+    page.on('request', (request) => {
+      if (!request.url().endsWith('/api/rpc2'))
+        return
+
+      const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
+      if (payload?.method)
+        calls.push({ method: payload.method, params: payload.params ?? {} })
+    })
+
+    await page.setViewportSize({ width: 1280, height: 720 })
+    const fixture = await installKomariFixture(page, {
+      nodeCardPingTaskBindings: primaryBinding(202),
+      nodeCardPingFixture: { metric: 'valid' },
+    })
+    await openStablePage(page)
+    await expectNodeCardPing(page, '200 ms', '25.0%')
+
+    const initialSelectedMetricQueries = selectedMetricQueryCount()
+    fixture.setNodeCardPingFixture({ metric: 'error', legacy: 'selected-empty' })
+    await page.evaluate(() => window.dispatchEvent(new Event('online')))
+    await expect.poll(selectedMetricQueryCount).toBeGreaterThan(initialSelectedMetricQueries)
+
+    await expectNodeCardPing(page, '200 ms', '25.0%')
+    await expect(nodeCardPingPanel(page, 'latency')).not.toContainText('加载中')
   })
 
   test('hydrates an exact selected-task snapshot before a reload network refresh completes', async ({ page }) => {
