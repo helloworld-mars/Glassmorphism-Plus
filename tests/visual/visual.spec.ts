@@ -2,6 +2,7 @@ import type { Locator, Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { expect, test } from '@playwright/test'
 import { comparePingTaskOrder, createPingTaskOrderMap, orderPingTasksByBackend } from '../../src/utils/metricSeries'
+import { smoothPingChartDisplayRows } from '../../src/utils/pingChartSmoothing'
 import { createPingTimeWindow, getPingTimeBucketIndex, parsePingTimestampMs } from '../../src/utils/pingTime'
 import { installKomariFixture, PRIMARY_NODE_UUID } from './fixtures/komari'
 
@@ -49,6 +50,18 @@ function nodeCardPingPanel(page: Page, metric: 'latency' | 'loss') {
 async function expectNodeCardPing(page: Page, latency: string, loss: string): Promise<void> {
   await expect(nodeCardPingPanel(page, 'latency')).toContainText(latency)
   await expect(nodeCardPingPanel(page, 'loss')).toContainText(loss)
+}
+
+async function openPrimaryPingDialog(page: Page): Promise<Locator> {
+  await nodeCardPingPanel(page, 'latency').click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('[data-ping-chart]')).toBeVisible()
+  return dialog
+}
+
+function readPingRangeHours(params: Record<string, unknown>): number {
+  return (Date.parse(String(params.end)) - Date.parse(String(params.start))) / 3_600_000
 }
 
 async function expectNodeCardPingTooltip(page: Page, metric: 'latency' | 'loss', text: string): Promise<void> {
@@ -200,6 +213,141 @@ test('Ping task displays retain the raw public task order instead of weight or n
     .toEqual([30, 10, 20, 5])
 })
 
+test('Ping display smoothing keeps raw timestamps, missing gaps, and zero-valued real samples intact', () => {
+  const raw = [
+    { time: '2026-07-25T11:00:00.000Z', 202: 10 },
+    { time: '2026-07-25T11:01:00.000Z', 202: null },
+    { time: '2026-07-25T11:02:00.000Z', 202: 0 },
+    { time: '2026-07-25T11:03:00.000Z', 202: 20 },
+  ]
+
+  const display = smoothPingChartDisplayRows(raw, [202])
+  expect(display).not.toBe(raw)
+  expect(display.map(row => row.time)).toEqual(raw.map(row => row.time))
+  expect(display[1]![202]).toBeNull()
+  expect(display[2]![202]).toBe(0)
+  expect(display[3]![202]).toBe(7)
+  expect(raw).toEqual([
+    { time: '2026-07-25T11:00:00.000Z', 202: 10 },
+    { time: '2026-07-25T11:01:00.000Z', 202: null },
+    { time: '2026-07-25T11:02:00.000Z', 202: 0 },
+    { time: '2026-07-25T11:03:00.000Z', 202: 20 },
+  ])
+})
+
+test('Ping modal and detail restore the smoothing control without changing the raw data contract', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await installKomariFixture(page, { nodeCardPingFixture: { metric: 'valid' } })
+  await openStablePage(page)
+
+  const dialog = await openPrimaryPingDialog(page)
+  const dialogChart = dialog.locator('[data-ping-chart]')
+  const dialogSmooth = dialogChart.getByRole('button', { name: '平滑峰值', exact: true })
+  await expect(dialogSmooth).toHaveAttribute('aria-pressed', 'false')
+  await expect(dialogChart).toHaveAttribute('data-ping-chart-smoothing', 'disabled')
+  await dialogSmooth.click()
+  await expect(dialogSmooth).toHaveAttribute('aria-pressed', 'true')
+  await expect(dialogChart).toHaveAttribute('data-ping-chart-smoothing', 'enabled')
+  await dialogSmooth.click()
+  await expect(dialogChart).toHaveAttribute('data-ping-chart-smoothing', 'disabled')
+
+  await dialog.getByRole('button', { name: '关闭' }).click()
+  await expect(dialog).toHaveCount(0)
+
+  await page.goto(`/instance/${PRIMARY_NODE_UUID}`)
+  await expect(page.getByText('硬件信息')).toBeVisible()
+  const detailChart = page.locator('[data-ping-chart]').first()
+  const detailSmooth = detailChart.getByRole('button', { name: '平滑峰值', exact: true })
+  await expect(detailSmooth).toHaveAttribute('aria-pressed', 'false')
+  await detailSmooth.click()
+  await expect(detailChart).toHaveAttribute('data-ping-chart-smoothing', 'enabled')
+})
+
+test('Ping-only 7-day and 14-day ranges use their own Metric windows and do not alter load ranges', async ({ page }) => {
+  const pingMetricCalls: Array<Record<string, unknown>> = []
+  page.on('request', (request) => {
+    if (!request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
+    if (payload?.method === 'public:queryMetrics') {
+      const keys = Array.isArray(payload.params?.metric_keys) ? payload.params.metric_keys.map(String) : []
+      if (keys.includes('ping.latency_ms'))
+        pingMetricCalls.push(payload.params ?? {})
+    }
+  })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await installKomariFixture(page, { nodeCardPingFixture: { metric: 'valid' }, pingRecordPreserveTime: 720 })
+  await openStablePage(page)
+  const dialog = await openPrimaryPingDialog(page)
+  const rangeTabs = dialog.locator('[data-ping-chart] [role="tab"]')
+  await expect(rangeTabs).toHaveText(['1 小时', '6 小时', '12 小时', '1 天', '7 天', '14 天', '30 天', '自定义'])
+
+  pingMetricCalls.length = 0
+  await rangeTabs.getByText('7 天', { exact: true }).click()
+  await expect.poll(() => pingMetricCalls.some(params => readPingRangeHours(params) === 168)).toBe(true)
+  const sevenDay = pingMetricCalls.find(params => readPingRangeHours(params) === 168)!
+  expect(sevenDay.max_points).toBe(6000)
+  expect(sevenDay.metric_keys).toEqual(['ping.latency_ms', 'ping.loss'])
+
+  pingMetricCalls.length = 0
+  await rangeTabs.getByText('14 天', { exact: true }).click()
+  await expect.poll(() => pingMetricCalls.some(params => readPingRangeHours(params) === 336)).toBe(true)
+
+  await page.goto(`/instance/${PRIMARY_NODE_UUID}`)
+  await expect(page.getByText('硬件信息')).toBeVisible()
+  await expect(page.locator('[data-ping-chart] [role="tab"]')).toContainText(['7 天', '14 天'])
+  await expect(page.locator('[data-load-chart-range]')).toHaveText(/实时\s*4 小时\s*1 天\s*7 天\s*30 天\s*自定义/)
+  await expect(page.locator('[data-load-chart-range]')).not.toContainText('14 天')
+})
+
+test('Ping range availability respects the public Ping retention setting', async ({ page }) => {
+  await installKomariFixture(page, { nodeCardPingFixture: { metric: 'valid' }, pingRecordPreserveTime: 168 })
+  await openStablePage(page)
+  const dialog = await openPrimaryPingDialog(page)
+  const rangeTabs = dialog.locator('[data-ping-chart] [role="tab"]')
+  await expect(rangeTabs).toHaveText(['1 小时', '6 小时', '12 小时', '1 天', '7 天', '自定义'])
+})
+
+test('mobile viewport keeps Ping dialogs and route transitions above the page canvas without stale body lock', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await installKomariFixture(page, { nodeCardPingFixture: { metric: 'valid' } })
+  await openStablePage(page)
+
+  const dialog = await openPrimaryPingDialog(page)
+  await expect(page.locator('[data-app-dialog-safe-overlay]')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => ({
+    overflow: document.body.style.overflow,
+    pointerEvents: document.body.style.pointerEvents,
+    paddingRight: document.body.style.paddingRight,
+    marginRight: document.body.style.marginRight,
+  }))).toEqual({ overflow: '', pointerEvents: '', paddingRight: '', marginRight: '' })
+  await page.locator('[data-app-dialog-safe-overlay]').click({ position: { x: 2, y: 2 } })
+  await expect(dialog).toHaveCount(0)
+  await expect(page.locator('[data-app-dialog-safe-overlay]')).toHaveCount(0)
+
+  await page.goto(`/instance/${PRIMARY_NODE_UUID}`)
+  await expect(page.getByText('硬件信息')).toBeVisible()
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+  await page.goBack()
+  await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => {
+    const app = document.querySelector<HTMLElement>('#app')
+    const viewport = document.querySelector<HTMLElement>('[data-app-viewport]')
+    const visualHeight = window.visualViewport?.height ?? window.innerHeight
+    return Boolean(app && viewport
+      && app.getBoundingClientRect().height >= visualHeight
+      && viewport.getBoundingClientRect().height >= visualHeight
+      && document.documentElement.scrollWidth <= document.documentElement.clientWidth)
+  })).toBe(true)
+  await expect.poll(() => page.evaluate(() => ({
+    overflow: document.body.style.overflow,
+    pointerEvents: document.body.style.pointerEvents,
+    paddingRight: document.body.style.paddingRight,
+    marginRight: document.body.style.marginRight,
+  }))).toEqual({ overflow: '', pointerEvents: '', paddingRight: '', marginRight: '' })
+})
+
 test('brand metadata and homepage footer retain current and original attribution', async ({ page }) => {
   const themeManifest = JSON.parse(readFileSync(new URL('../../komari-theme.json', import.meta.url), 'utf8')) as Record<string, unknown>
   const packageMetadata = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as Record<string, unknown>
@@ -209,13 +357,13 @@ test('brand metadata and homepage footer retain current and original attribution
     name: 'Komari Glassmorphism Plus',
     short: 'glassmorphism-plus',
     description: 'A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.',
-    version: '1.3.3',
+    version: '1.3.4',
     author: 'helloworld-mars',
     url: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(packageMetadata).toMatchObject({
     name: 'komari-theme-glassmorphism-plus',
-    version: '1.3.3',
+    version: '1.3.4',
     homepage: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(themeManifest.short).toMatch(/^[\w-]+$/)
@@ -245,7 +393,7 @@ test('brand metadata and homepage footer retain current and original attribution
 
   const footer = page.locator('footer')
   await expect(footer.getByRole('link', { name: 'Glassmorphism Plus' })).toHaveAttribute('href', 'https://github.com/helloworld-mars/Glassmorphism-Plus')
-  await expect(footer.getByText('v1.3.3 · helloworld-mars', { exact: true }).first()).toBeVisible()
+  await expect(footer.getByText('v1.3.4 · helloworld-mars', { exact: true }).first()).toBeVisible()
   await expect(footer.getByRole('link', { name: 'Based on the original theme by sanrokamlan' }))
     .toHaveAttribute('href', 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism')
   await expect(footer).not.toContainText('unknown')

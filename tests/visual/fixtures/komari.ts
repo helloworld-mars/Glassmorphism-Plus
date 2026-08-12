@@ -35,6 +35,7 @@ export interface VisualFixtureOptions {
   hidePingTaskBindingEntry?: boolean
   siteName?: string
   disablePageAnimation?: boolean
+  pingRecordPreserveTime?: number
 }
 
 export interface NodeCardPingFixture {
@@ -922,7 +923,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
         private_site: false,
         record_enabled: true,
         record_preserve_time: 720,
-        ping_record_preserve_time: 720,
+        ping_record_preserve_time: options.pingRecordPreserveTime ?? 720,
         sitename: siteName,
         theme: 'Glassmorphism',
         theme_settings: settings,

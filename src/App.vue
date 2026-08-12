@@ -65,56 +65,58 @@ onUnmounted(() => {
 <template>
   <Provider>
     <Background />
-    <Transition
-      :css="!appStore.disablePageAnimation"
-      enter-active-class="transition-opacity duration-200 ease-out" enter-from-class="opacity-0"
-      enter-to-class="opacity-100" leave-active-class="transition-opacity duration-300 ease-in"
-      leave-from-class="opacity-100" leave-to-class="opacity-0"
-    >
-      <LoadingCover v-if="appStore.loading" />
-    </Transition>
-    <Header />
-    <Transition
-      :css="!appStore.disablePageAnimation"
-      enter-active-class="transition-all duration-300 ease-out"
-      enter-from-class="opacity-0 translate-y-2"
-      enter-to-class="opacity-100 translate-y-0"
-    >
-      <div v-if="!appStore.loading" class="app-shell">
-        <main class="min-h-screen overflow-hidden">
-          <div v-if="appStore.connectionError" class="relative z-10 mx-auto max-w-[1280px] px-4 pt-4">
-            <Alert variant="destructive" class="!pr-28 border-none bg-destructive/10 backdrop-blur-xs rounded-md">
-              <Icon icon="tabler:plug-connected-x" />
-              <AlertTitle>RPC 服务错误</AlertTitle>
-              <AlertDescription>连接服务器失败，请检查网络后重试。</AlertDescription>
-              <AlertAction class="top-1/2 -translate-y-1/2">
-                <Button size="sm" variant="outline" :disabled="isRetryingConnection" @click="retryConnection">
-                  <Icon :icon="isRetryingConnection ? 'tabler:loader-2' : 'tabler:refresh'" :class="isRetryingConnection && 'animate-spin'" />
-                  {{ isRetryingConnection ? '重试中' : '重试' }}
-                </Button>
-              </AlertAction>
-            </Alert>
-          </div>
-          <div class="max-w-[1280px] mx-auto">
-            <RouterView v-slot="{ Component }">
-              <Transition
-                :css="!appStore.disablePageAnimation"
-                enter-active-class="transition-all duration-300 ease-out"
-                enter-from-class="opacity-0 translate-y-2" enter-to-class="opacity-100 translate-y-0"
-                leave-active-class="transition-opacity duration-150 ease-in" leave-from-class="opacity-100"
-                leave-to-class="opacity-0"
-                :mode="appStore.disablePageAnimation ? 'default' : 'out-in'"
-              >
-                <KeepAlive :include="['HomeView']">
-                  <component :is="Component" />
-                </KeepAlive>
-              </Transition>
-            </RouterView>
-          </div>
-        </main>
-        <Footer />
-      </div>
-    </Transition>
-    <Toaster rich-colors close-button position="top-center" />
+    <div class="app-viewport" data-app-viewport>
+      <Transition
+        :css="!appStore.disablePageAnimation"
+        enter-active-class="transition-opacity duration-200 ease-out" enter-from-class="opacity-0"
+        enter-to-class="opacity-100" leave-active-class="transition-opacity duration-300 ease-in"
+        leave-from-class="opacity-100" leave-to-class="opacity-0"
+      >
+        <LoadingCover v-if="appStore.loading" />
+      </Transition>
+      <Header />
+      <Transition
+        :css="!appStore.disablePageAnimation"
+        enter-active-class="transition-all duration-300 ease-out"
+        enter-from-class="opacity-0 translate-y-2"
+        enter-to-class="opacity-100 translate-y-0"
+      >
+        <div v-if="!appStore.loading" class="app-shell">
+          <main class="min-h-[100dvh] overflow-x-hidden">
+            <div v-if="appStore.connectionError" class="relative z-10 mx-auto max-w-[1280px] px-4 pt-4">
+              <Alert variant="destructive" class="!pr-28 border-none bg-destructive/10 backdrop-blur-xs rounded-md">
+                <Icon icon="tabler:plug-connected-x" />
+                <AlertTitle>RPC 服务错误</AlertTitle>
+                <AlertDescription>连接服务器失败，请检查网络后重试。</AlertDescription>
+                <AlertAction class="top-1/2 -translate-y-1/2">
+                  <Button size="sm" variant="outline" :disabled="isRetryingConnection" @click="retryConnection">
+                    <Icon :icon="isRetryingConnection ? 'tabler:loader-2' : 'tabler:refresh'" :class="isRetryingConnection && 'animate-spin'" />
+                    {{ isRetryingConnection ? '重试中' : '重试' }}
+                  </Button>
+                </AlertAction>
+              </Alert>
+            </div>
+            <div class="max-w-[1280px] mx-auto">
+              <RouterView v-slot="{ Component }">
+                <Transition
+                  :css="!appStore.disablePageAnimation"
+                  enter-active-class="transition-all duration-300 ease-out"
+                  enter-from-class="opacity-0 translate-y-2" enter-to-class="opacity-100 translate-y-0"
+                  leave-active-class="transition-opacity duration-150 ease-in" leave-from-class="opacity-100"
+                  leave-to-class="opacity-0"
+                  :mode="appStore.disablePageAnimation ? 'default' : 'out-in'"
+                >
+                  <KeepAlive :include="['HomeView']">
+                    <component :is="Component" />
+                  </KeepAlive>
+                </Transition>
+              </RouterView>
+            </div>
+          </main>
+          <Footer />
+        </div>
+      </Transition>
+      <Toaster rich-colors close-button position="top-center" />
+    </div>
   </Provider>
 </template>

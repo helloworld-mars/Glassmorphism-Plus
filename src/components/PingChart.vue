@@ -18,6 +18,7 @@ import { loadPingMetricStats, loadPublicPingTasks, queryMetrics } from '@/servic
 import { useAppStore } from '@/stores/app'
 import { ACCESSIBLE_LINE_TYPES, getChartSeriesPalette } from '@/utils/chartPalette'
 import { isPingMetric, normalizeMetricSeriesList, orderPingTasksByBackend, PING_LATENCY_METRIC, PING_LOSS_METRIC, pingTaskId, pingTaskName } from '@/utils/metricSeries'
+import { smoothPingChartDisplayRows } from '@/utils/pingChartSmoothing'
 import { createNextAlignedPingTimeWindow, createPingTimeWindow, isPingTimestampInWindow, parsePingTimestampMs } from '@/utils/pingTime'
 import '@/utils/echarts' // 共享 ECharts 配置
 
@@ -66,6 +67,9 @@ const presetViews = [
   { label: '6 小时', hours: 6 },
   { label: '12 小时', hours: 12 },
   { label: '1 天', hours: 24 },
+  { label: '7 天', hours: 168 },
+  { label: '14 天', hours: 336 },
+  { label: '30 天', hours: 720 },
 ]
 const CUSTOM_VIEW_LABEL = '自定义'
 const DEFAULT_CUSTOM_RANGE_HOURS = 24
@@ -166,6 +170,8 @@ const legacyCustomRangeFallback = ref(false)
 const selectedTaskIds = ref<number[]>([])
 const isTouchTooltipMode = ref(false)
 const activeTaskTooltipId = ref<number | null>(null)
+const smoothPeaks = ref(false)
+const smoothInfoTooltipOpen = ref(false)
 
 const chartMargin = { top: 30, right: 24, bottom: 52, left: 56 }
 let coarsePointerMediaQuery: MediaQueryList | null = null
@@ -190,7 +196,20 @@ function toggleTaskTooltip(taskId: number) {
   if (!isTouchTooltipMode.value)
     return
 
+  smoothInfoTooltipOpen.value = false
   activeTaskTooltipId.value = activeTaskTooltipId.value === taskId ? null : taskId
+}
+
+function setSmoothInfoTooltipOpen(open: boolean) {
+  smoothInfoTooltipOpen.value = open
+}
+
+function toggleSmoothInfoTooltip() {
+  if (!isTouchTooltipMode.value)
+    return
+
+  activeTaskTooltipId.value = null
+  smoothInfoTooltipOpen.value = !smoothInfoTooltipOpen.value
 }
 
 function normalizeMetricTaskId(taskId: string): number {
@@ -463,8 +482,12 @@ const chartData = computed(() => {
   if (selectedTaskIds.value.length === 0)
     return []
 
-  // Raw Ping history only: no peak filtering or gap filling.
-  return mergedData.value
+  if (!smoothPeaks.value)
+    return mergedData.value
+
+  // Smoothing is display-only. It deliberately preserves raw timestamps and
+  // gaps so missing/PENDING samples cannot become fabricated history.
+  return smoothPingChartDisplayRows(mergedData.value, selectedTaskIds.value)
 })
 
 // ==================== 工具函数 ====================
@@ -599,7 +622,7 @@ const pingChartOption = computed(() => {
       name: task.name,
       type: 'line' as const,
       data: data.map(d => d[task.id] as number | null ?? null),
-      smooth: false,
+      smooth: smoothPeaks.value ? 0.6 : false,
       showSymbol: false,
       connectNulls: false,
       lineStyle: { width: 1.5, color, cap: 'round' as const, type: lineType },
@@ -710,6 +733,7 @@ watch(() => props.uuid, () => {
   tasks.value = []
   selectedTaskIds.value = []
   activeTaskTooltipId.value = null
+  smoothInfoTooltipOpen.value = false
   fetchRecords()
 })
 
@@ -731,7 +755,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-4">
+  <div
+    class="flex flex-col gap-4"
+    data-ping-chart
+    :data-ping-chart-smoothing="smoothPeaks ? 'enabled' : 'disabled'"
+  >
     <!-- 时间选择器 -->
     <div class="flex flex-col gap-2">
       <Tabs v-model="selectedView" class="w-full items-center">
@@ -905,6 +933,42 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </div>
+
+        <TooltipProvider>
+          <div class="flex flex-wrap items-center gap-2 py-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              class="h-8 text-xs"
+              :class="smoothPeaks && 'border-green-600/50 bg-green-600/10 text-green-700 dark:text-green-400'"
+              :aria-pressed="smoothPeaks"
+              @click="smoothPeaks = !smoothPeaks"
+            >
+              平滑峰值
+            </Button>
+            <Tooltip
+              :open="isTouchTooltipMode ? smoothInfoTooltipOpen : undefined"
+              @update:open="setSmoothInfoTooltipOpen"
+            >
+              <TooltipTrigger as-child>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  class="text-slate-500"
+                  aria-label="平滑峰值说明"
+                  @click.stop="toggleSmoothInfoTooltip"
+                >
+                  <Icon icon="carbon:information" :width="14" :height="14" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <span>仅平滑真实采样点；不填补缺失或待采样数据。</span>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        </TooltipProvider>
 
         <!-- 图表 -->
         <div class="h-80 bg-background/50 p-4 rounded-md">

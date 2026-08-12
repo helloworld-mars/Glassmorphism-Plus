@@ -137,6 +137,13 @@
     border-color: var(--color-border);
   }
 
+  html,
+  body,
+  #app {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
   html {
     background-color: var(--color-background);
     font-family: var(--font-sans);
@@ -144,15 +151,27 @@
 
   body,
   #app {
-    min-height: 100vh;
     color: var(--color-foreground);
     font-family: var(--font-sans);
   }
 
   body {
-    /* Background.vue owns the visible canvas; html keeps the no-JS fallback color. */
-    background-color: transparent;
+    /* The explicit fallback covers WebKit's dynamic viewport during toolbar
+       changes; Background.vue paints above it rather than behind the root. */
+    background-color: var(--color-background);
   }
+
+  #app {
+    isolation: isolate;
+  }
+}
+
+.app-viewport {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 /* Keep the native detail-node menu in the same color scheme as the active theme.
