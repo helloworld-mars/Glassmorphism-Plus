@@ -4,20 +4,21 @@
 
 ## 0. AI 开发前必须做的事
 
-1. 先读本文件，再读最近作用域的 `AGENTS.md`。
-2. 读 [AICACHE.md](AICACHE.md)，确认当前待办、已做、验证结果、风险点。
-3. 修改前先判断改动属于哪类：
+1. 先读根 [AGENTS.md](AGENTS.md) 和 [CODEX.md](CODEX.md)，确认永久工作流、安全、Git、发布与产品约束。
+2. 再读本文件和最近作用域的 `AGENTS.md`，确认详细架构与局部实现规则。
+3. 读 [AICACHE.md](AICACHE.md)，确认当前待办、已做、验证结果、风险点。
+4. 修改前先判断改动属于哪类：
    - **M2**：只优化性能，不改交互。
    - **M3**：只加强安全与权限。
    - **M4**：只改 UI/UX。
    - **M5**：新增功能。
    - **M6**：文档、测试与开发者体验。
-4. 开发中如果任务会跨文件或容易中断，把计划和进度写进 [AICACHE.md](AICACHE.md)。
-5. 结束前把 [AICACHE.md](AICACHE.md) 更新为可交接状态：做了什么、没做什么、验证了什么、下一步是什么。
+5. 开发中如果任务会跨文件或容易中断，把计划和进度写进 [AICACHE.md](AICACHE.md)。
+6. 结束前把 [AICACHE.md](AICACHE.md) 更新为可交接状态：做了什么、没做什么、验证了什么、下一步是什么。
 
 ## 1. 项目是什么
 
-**Komari Glassmorphism** 是一个 Komari Monitor 主题，使用 Vue 3 + Vite 构建。它的发布产物是 Komari 可以导入的 zip 包，不是普通 Web App 部署包。
+**Komari Glassmorphism Plus** 是一个 Komari Monitor 主题，使用 Vue 3 + Vite 构建。它的发布产物是 Komari 可以导入的 zip 包，不是普通 Web App 部署包。
 
 关键事实：
 
@@ -78,6 +79,7 @@ bun run test:visual
 .
 ├── AIAGENTREADME.md          # AI/二开总手册
 ├── AICACHE.md                # AI 工作缓存、待办、交接日志
+├── CODEX.md                  # Codex 永久工作流、安全、发布与产品规则
 ├── CLAUDE.md                 # Claude Code 入口指令，指向本文件
 ├── AGENTS.md                 # 根作用域 agent 指令
 ├── src/AGENTS.md             # src 子树作用域 agent 指令

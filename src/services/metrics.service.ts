@@ -133,10 +133,13 @@ function cloneMetricSeries(series: MetricSeries): MetricSeries {
 }
 
 function mergeRawPingMetricPoint(current: MetricPoint, candidate: MetricPoint): MetricPoint {
-  // A `fill_empty` null must never erase an already observed backend sample.
-  // The later real point otherwise wins, preserving its original timestamp and
-  // value without deriving or interpolating anything.
-  if (current.value !== null && candidate.value === null)
+  // A synthetic `fill_empty` null (no observed count) must never erase a real
+  // sample. An observed null with count > 0 is different: Komari uses it for a
+  // fully-lost Ping rollup, so it must be allowed to replace stale finite data.
+  const candidateHasObservedCount = typeof candidate.count === 'number'
+    && Number.isFinite(candidate.count)
+    && candidate.count > 0
+  if (current.value !== null && candidate.value === null && !candidateHasObservedCount)
     return cloneMetricPoint(current)
   return cloneMetricPoint(candidate)
 }

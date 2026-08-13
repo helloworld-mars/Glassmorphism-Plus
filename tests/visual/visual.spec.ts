@@ -1,8 +1,10 @@
 import type { Locator, Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { expect, test } from '@playwright/test'
+import { getQueryMetricsRequestKey } from '../../src/services/metrics.service'
 import { comparePingTaskOrder, createPingTaskOrderMap, orderPingTasksByBackend } from '../../src/utils/metricSeries'
 import { smoothPingChartDisplayRows } from '../../src/utils/pingChartSmoothing'
+import { normalizePingMetricSamples } from '../../src/utils/pingMetricSamples'
 import { createPingTimeWindow, getPingTimeBucketIndex, parsePingTimestampMs } from '../../src/utils/pingTime'
 import { installKomariFixture, PRIMARY_NODE_UUID } from './fixtures/komari'
 
@@ -235,6 +237,77 @@ test('Ping display smoothing keeps raw timestamps, missing gaps, and zero-valued
   ])
 })
 
+test('paired Ping rollups restore successful RTT, preserve true low latency, and keep outages null', () => {
+  const entityId = PRIMARY_NODE_UUID
+  const tags = { task_id: '17', task_name: 'Hinet' }
+  const times = [
+    '2026-08-07T00:00:00.000Z',
+    '2026-08-07T01:00:00.000Z',
+    '2026-08-07T06:00:00.000Z',
+    '2026-08-07T07:00:00.000Z',
+    '2026-08-07T08:00:00.000Z',
+  ]
+  const samples = normalizePingMetricSamples([
+    {
+      metric_key: 'ping.latency_ms',
+      entity_id: entityId,
+      tags,
+      downsampled: true,
+      count: times.length,
+      points: [
+        { time: times[0]!, value: 11.166666666666666, count: 60 },
+        { time: times[1]!, value: null, count: 60 },
+        { time: times[2]!, value: 9.4, count: 60 },
+        { time: times[3]!, value: 9, count: 60 },
+        { time: times[4]!, value: 12, count: 60 },
+      ],
+    },
+    {
+      metric_key: 'ping.loss',
+      entity_id: entityId,
+      tags,
+      downsampled: true,
+      count: times.length,
+      points: [
+        { time: times[0]!, value: 0.6, count: 60 },
+        { time: times[1]!, value: 1, count: 60 },
+        { time: times[2]!, value: 2 / 3, count: 60 },
+        { time: times[3]!, value: 0, count: 60 },
+        { time: times[4]!, value: 0, count: 60 },
+      ],
+    },
+  ])
+
+  expect(samples.map(sample => sample.taskId)).toEqual(['17', '17', '17', '17', '17'])
+  expect(samples[0]?.latency).toBeCloseTo(29.4166666667, 8)
+  expect(samples[1]).toMatchObject({ latency: null, loss: 1, observed: true })
+  expect(samples[2]?.latency).toBeCloseTo(30.2, 8)
+  expect(samples[3]?.latency).toBe(9)
+  expect(samples[4]?.latency).toBe(12)
+
+  const rows = samples.map(sample => ({ time: sample.time, 17: sample.latency }))
+  const smoothed = smoothPingChartDisplayRows(rows, [17])
+  expect(rows[1]?.[17]).toBeNull()
+  expect(smoothed[1]?.[17]).toBeNull()
+  expect(smoothed[2]?.[17]).toBeCloseTo(30.2, 8)
+})
+
+test('Ping Metric request identities isolate 7-day, 14-day, and 30-day windows', () => {
+  const requestKey = (hours: number) => getQueryMetricsRequestKey({
+    metric_keys: ['ping.latency_ms', 'ping.loss'],
+    entity_id: PRIMARY_NODE_UUID,
+    hours,
+    start: new Date(Date.UTC(2026, 7, 13) - hours * 3_600_000).toISOString(),
+    end: new Date(Date.UTC(2026, 7, 13)).toISOString(),
+    max_points: 6000,
+    aggregation: 'avg',
+    downsample: true,
+    fill_empty: true,
+  })
+
+  expect(new Set([requestKey(168), requestKey(336), requestKey(720)]).size).toBe(3)
+})
+
 test('Ping modal and detail restore the smoothing control without changing the raw data contract', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await installKomariFixture(page, { nodeCardPingFixture: { metric: 'valid' } })
@@ -294,6 +367,20 @@ test('Ping-only 7-day and 14-day ranges use their own Metric windows and do not 
   await rangeTabs.getByText('14 天', { exact: true }).click()
   await expect.poll(() => pingMetricCalls.some(params => readPingRangeHours(params) === 336)).toBe(true)
 
+  pingMetricCalls.length = 0
+  await rangeTabs.getByText('30 天', { exact: true }).click()
+  await expect.poll(() => pingMetricCalls.some(params => readPingRangeHours(params) === 720)).toBe(true)
+  const thirtyDay = pingMetricCalls.find(params => readPingRangeHours(params) === 720)!
+  const chart = dialog.locator('[data-ping-chart]')
+  await expect(chart).toHaveAttribute('data-ping-chart-axis-type', 'time')
+  await expect.poll(async () => {
+    const start = Number(await chart.getAttribute('data-ping-chart-window-start'))
+    const end = Number(await chart.getAttribute('data-ping-chart-window-end'))
+    return (end - start) / 3_600_000
+  }).toBe(720)
+  expect(thirtyDay.max_points).toBe(6000)
+  expect(thirtyDay.metric_keys).toEqual(['ping.latency_ms', 'ping.loss'])
+
   await page.goto(`/instance/${PRIMARY_NODE_UUID}`)
   await expect(page.getByText('硬件信息')).toBeVisible()
   await expect(page.locator('[data-ping-chart] [role="tab"]')).toContainText(['7 天', '14 天'])
@@ -307,6 +394,55 @@ test('Ping range availability respects the public Ping retention setting', async
   const dialog = await openPrimaryPingDialog(page)
   const rangeTabs = dialog.locator('[data-ping-chart] [role="tab"]')
   await expect(rangeTabs).toHaveText(['1 小时', '6 小时', '12 小时', '1 天', '7 天', '自定义'])
+})
+
+test('30-day Ping keeps the requested domain when only the final seven daily rollups exist', async ({ page }) => {
+  const queryCalls: Array<Record<string, unknown>> = []
+  const legacyCalls: Array<Record<string, unknown>> = []
+  page.on('request', (request) => {
+    if (!request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
+    if (payload?.method === 'public:queryMetrics') {
+      const keys = Array.isArray(payload.params?.metric_keys) ? payload.params.metric_keys.map(String) : []
+      if (keys.includes('ping.latency_ms'))
+        queryCalls.push(payload.params ?? {})
+    }
+    if (payload?.method === 'public:getPingRecords'
+      || (payload?.method === 'common:getRecords' && payload.params?.type === 'ping')) {
+      legacyCalls.push(payload.params ?? {})
+    }
+  })
+
+  const metricSamples = Array.from({ length: 7 }, (_, index) => ({
+    time: new Date(Date.UTC(2026, 7, 7 + index)).toISOString(),
+    taskId: 202,
+    latency: 30 + index / 10,
+    loss: 0,
+    latencyCount: 420,
+    lossCount: 420,
+  }))
+  await installKomariFixture(page, {
+    clockNow: '2026-08-13T08:00:00.000Z',
+    pingRecordPreserveTime: 720,
+    nodeCardPingFixture: { metric: 'valid', metricSamples },
+  })
+  await openStablePage(page)
+  const dialog = await openPrimaryPingDialog(page)
+  queryCalls.length = 0
+  legacyCalls.length = 0
+  await dialog.locator('[data-ping-chart] [role="tab"]').getByText('30 天', { exact: true }).click()
+  await expect.poll(() => queryCalls.some(params => readPingRangeHours(params) === 720)).toBe(true)
+
+  const chart = dialog.locator('[data-ping-chart]')
+  await expect(chart).toHaveAttribute('data-ping-chart-axis-type', 'time')
+  await expect(chart).toHaveAttribute('data-ping-chart-record-count', '7')
+  await expect.poll(async () => {
+    const start = Number(await chart.getAttribute('data-ping-chart-window-start'))
+    const end = Number(await chart.getAttribute('data-ping-chart-window-end'))
+    return (end - start) / 3_600_000
+  }).toBe(720)
+  expect(legacyCalls.some(params => Number(params.hours) === 720)).toBe(false)
 })
 
 test('mobile viewport keeps Ping dialogs and route transitions above the page canvas without stale body lock', async ({ page }) => {
@@ -357,13 +493,13 @@ test('brand metadata and homepage footer retain current and original attribution
     name: 'Komari Glassmorphism Plus',
     short: 'glassmorphism-plus',
     description: 'A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.',
-    version: '1.3.4',
+    version: '1.3.5',
     author: 'helloworld-mars',
     url: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(packageMetadata).toMatchObject({
     name: 'komari-theme-glassmorphism-plus',
-    version: '1.3.4',
+    version: '1.3.5',
     homepage: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(themeManifest.short).toMatch(/^[\w-]+$/)
@@ -393,7 +529,7 @@ test('brand metadata and homepage footer retain current and original attribution
 
   const footer = page.locator('footer')
   await expect(footer.getByRole('link', { name: 'Glassmorphism Plus' })).toHaveAttribute('href', 'https://github.com/helloworld-mars/Glassmorphism-Plus')
-  await expect(footer.getByText('v1.3.4 · helloworld-mars', { exact: true }).first()).toBeVisible()
+  await expect(footer.getByText('v1.3.5 · helloworld-mars', { exact: true }).first()).toBeVisible()
   await expect(footer.getByRole('link', { name: 'Based on the original theme by sanrokamlan' }))
     .toHaveAttribute('href', 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism')
   await expect(footer).not.toContainText('unknown')

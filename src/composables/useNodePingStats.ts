@@ -11,8 +11,9 @@ import { SharedCache } from '@/services/cache.service'
 import { abortPingRecords, loadPingRecords } from '@/services/history.service'
 import { abortPingMetricStats, abortQueryMetrics, getAssignedPublicPingTask, getCachedRawPingMetricSeries, loadPingMetricStats, loadPublicPingTaskCatalog, queryMetrics } from '@/services/metrics.service'
 import { pingRefreshScheduler } from '@/services/ping-refresh-scheduler.service'
-import { isPingMetric, normalizeMetricSeriesList, PING_LATENCY_METRIC, PING_LOSS_METRIC, pingTaskId } from '@/utils/metricSeries'
+import { PING_LATENCY_METRIC, PING_LOSS_METRIC } from '@/utils/metricSeries'
 import { resolvePingHistoryBucketState } from '@/utils/pingHistoryState'
+import { normalizePingMetricSamples } from '@/utils/pingMetricSamples'
 import { createNextAlignedPingTimeWindow, getPingTimeBucketIndex, isPingTimestampInWindow, parsePingTimestampMs } from '@/utils/pingTime'
 
 export interface NodePingHistoryPoint {
@@ -625,49 +626,39 @@ async function loadPingMetricRecords(
   )
 
   if (rawMetricSeries) {
-    const seriesList = normalizeMetricSeriesList(rawMetricSeries)
-    for (const series of seriesList) {
-      if (series.entity_id !== nodeUuid)
+    const samples = normalizePingMetricSamples(rawMetricSeries, {
+      entityId: nodeUuid,
+      taskId: selectedTaskId,
+      start: window.start,
+      end: window.end,
+    })
+    for (const sample of samples) {
+      // Ignore pure fill-empty anchors. They preserve a chart domain but are
+      // not telemetry and must not make a failed Metric query look usable.
+      if (!sample.observed)
         continue
 
-      const rawTaskId = pingTaskId(series)
-      const canonicalTaskId = normalizeSelectedPingTaskId(rawTaskId)
+      const canonicalTaskId = normalizeSelectedPingTaskId(sample.taskId)
       if (selectedTaskId && canonicalTaskId !== selectedTaskId)
         continue
 
-      const taskId = normalizeTaskId(rawTaskId)
+      const taskId = normalizeTaskId(sample.taskId)
       if (!Number.isFinite(taskId))
         continue
 
-      if (series.metric_key === PING_LOSS_METRIC) {
-        for (const point of series.points) {
-          const timestamp = parsePingTimestampMs(point.time)
-          if (!isFiniteNumber(point.value) || timestamp === null || !isPingTimestampInWindow(timestamp, window))
-            continue
+      metricRecords.push({
+        client: sample.entityId,
+        task_id: taskId,
+        time: sample.time,
+        value: sample.latency ?? -1,
+      })
 
-          metricLossPoints.push({
-            taskId: canonicalTaskId ?? rawTaskId,
-            time: point.time,
-            value: point.value,
-            count: isFiniteNumber(point.count) && point.count > 0 ? point.count : 1,
-          })
-        }
-        continue
-      }
-
-      if (!isPingMetric(series))
-        continue
-
-      for (const point of series.points) {
-        const timestamp = parsePingTimestampMs(point.time)
-        if (point.value === null || timestamp === null || !isPingTimestampInWindow(timestamp, window))
-          continue
-
-        metricRecords.push({
-          client: series.entity_id,
-          task_id: taskId,
-          time: point.time,
-          value: point.value,
+      if (sample.loss !== null) {
+        metricLossPoints.push({
+          taskId: canonicalTaskId ?? sample.taskId,
+          time: sample.time,
+          value: sample.loss,
+          count: sample.totalCount,
         })
       }
     }

@@ -1,79 +1,105 @@
-# CLAUDE.md
+# Glassmorphism Plus — Claude Code Entrypoint
 
-This file is the Claude Code entrypoint for this repository. The full AI/developer guide lives in [AIAGENTREADME.md](AIAGENTREADME.md). Read it before making non-trivial changes.
+This file is the Claude Code entrypoint for this repository. It complements the
+root [AGENTS.md](AGENTS.md); it is not a replacement for the detailed engineering
+guide or the Codex-specific permanent operating manual.
 
-## Required reading order
+## Required reading
 
-1. [AIAGENTREADME.md](AIAGENTREADME.md) — complete project architecture, coding rules, release contract, and development paths.
-2. [AICACHE.md](AICACHE.md) — current AI work cache: planned work, completed work, validation, blockers, and handoff notes.
-3. Nearest `AGENTS.md` for the files you are editing:
-   - [AGENTS.md](AGENTS.md) — root/release/repo rules.
-   - [src/AGENTS.md](src/AGENTS.md) — source-tree implementation rules.
-4. Relevant docs under [docs/](docs/): architecture, auth, cache, data flow, migration, milestones.
+Before non-trivial work, read:
 
-## What this project is
+1. [AGENTS.md](AGENTS.md) — repository bootstrap and root invariants.
+2. [AIAGENTREADME.md](AIAGENTREADME.md) — detailed architecture, implementation
+   guidance, development paths, and technical packaging mechanics.
+3. [AICACHE.md](AICACHE.md) — current task progress, validation, blockers, and
+   handoff context.
+4. The nearest scoped AGENTS.md, including
+   [src/AGENTS.md](src/AGENTS.md) for source-tree work.
+5. [CODEX.md](CODEX.md) when work intersects its durable safety, privacy, Git,
+   release, versioning, or protected-product rules. It is the Codex-specific
+   permanent workflow guide.
 
-Komari Glassmorphism is a Komari Monitor theme built with Vue 3 + Vite. The release artifact is a Komari-importable zip package, not a generic deployed web app.
+## Project facts
 
-Key release facts:
+Komari Glassmorphism Plus is a Komari Monitor theme built with Vue 3 and Vite.
+The release artifact is a Komari-importable theme ZIP, not a generic deployed web
+application.
 
-- [komari-theme.json](komari-theme.json) is release input and the only release-version source.
-- Do not use a top-level `version` in [package.json](package.json) as a release source; synchronize it only when it already exists as package metadata.
-- `bun run build` must preserve zip packaging from [vite.config.ts](vite.config.ts).
-- Build output must include `dist/` and `<source-parent>/<version>/Glassmorphism-Plus-release-<version>.zip`.
-- `bun run release:prepare` verifies that installer and creates the filtered `<source-parent>/<version>/Glassmorphism-Plus-release-<version>/` snapshot. Clone the sibling dynamic publish path separately so it retains its Git history; the final customer ZIP is local-only unless the user explicitly authorizes that upload.
-- Zip layout must stay: `komari-theme.json`, `preview.png`, `dist/`.
+- [komari-theme.json](komari-theme.json) is release input and the formal
+  release-version source.
+- A top-level [package.json](package.json) version, when present, is mirrored
+  package metadata and must match the manifest.
+- bun run build performs the production build and generates the versioned
+  installer ZIP.
+- bun run release:prepare verifies that installer ZIP and creates the filtered
+  release snapshot. It does not create the publish clone.
+- The installer layout remains komari-theme.json, preview.png, and dist/.
+- The final customer installer stays local unless the user explicitly authorizes
+  that specific upload.
 
-## Commands
+## Commands and testing
 
-Use `bun` from the repository root:
+Run commands from the repository root. Use actual [package.json](package.json)
+scripts as the authority:
 
 ```bash
 bun run dev
+bun run type-check
 bun run lint
 bun run build
+bun run test:visual
 bun run release:prepare
 bun run preview
 ```
 
-There is currently no test suite. Do not invent `bun test` or Vitest commands unless a real test framework is introduced.
+The repository has a deterministic Playwright visual/behavior regression suite
+under tests/visual/; bun run test:visual runs it after build-only.
+
+Do not invent bun test or Vitest commands unless a real framework is introduced.
+bun run lint uses --fix, so inspect its resulting diff. Do not run state-mutating
+release commands such as bun run publish or release preparation without explicit
+version/release authorization.
 
 ## Architecture rule
 
-New app code follows:
+New application code follows:
 
 ```text
 Component -> Composable -> Service -> RequestManager / CacheService -> API / RPC
 ```
 
 - Components render UI and call composables/services.
-- Composables own Vue state/lifecycle.
+- Composables own Vue state and lifecycle.
 - Services own business logic.
 - Shared limits/settings belong in [src/constants/](src/constants/).
-- Low-level API/RPC clients stay in [src/utils/api.ts](src/utils/api.ts) and [src/utils/rpc.ts](src/utils/rpc.ts).
-- Generic helpers stay in [src/utils/](src/utils/); do not put new business workflows there.
+- Low-level API/RPC clients stay in [src/utils/api.ts](src/utils/api.ts) and
+  [src/utils/rpc.ts](src/utils/rpc.ts).
+- Generic helpers belong in [src/utils/](src/utils/); do not put new business
+  workflows there.
 
-## AI work cache requirement
+## AI work cache
 
-For any task that may be interrupted, spans multiple files, or affects architecture/security/release behavior:
-
-1. Add or update an entry in [AICACHE.md](AICACHE.md) before or during implementation.
-2. Keep it accurate as work progresses.
-3. Before stopping, update it with completed work, validation results, known risks, and next steps.
-
-Do not store secrets, tokens, private passwords, or private server credentials in [AICACHE.md](AICACHE.md).
+For a task that may be interrupted, spans multiple files, or affects
+architecture/security/release behavior, keep [AICACHE.md](AICACHE.md) accurate with
+the plan, completed work, validation, risks, and next steps. Never store secrets,
+tokens, private passwords, or private server credentials there.
 
 ## Hard safeguards
 
-- Do not reintroduce Naive UI, UnoCSS, SCSS, or `lucide-vue-next`.
-- Use `@iconify/vue` for icons.
-- Only app global is `window.$message`.
+- Do not reintroduce Naive UI, UnoCSS, SCSS, or lucide-vue-next.
+- Use @iconify/vue for icons; the only app global is window.$message.
 - Keep public home/detail routes public; do not add broad router guards.
-- Gate sensitive actions/data paths through verified auth (`appStore.requireLoginPermission()` / auth service).
-- Do not parse raw `theme_settings` in components; normalize in [src/stores/app.ts](src/stores/app.ts).
-- Do not add ad-hoc caches for provider metadata, history records, or request deduplication.
-- Keep `nodeCardSize` default as `compact`; `mini` is optional and must not replace compact behavior.
-- Do not rename [komari-theme.json](komari-theme.json), [docs/preview.png](docs/preview.png), or the zip naming pattern.
-- Runtime image filenames under [public/images/](public/images/) are code contracts; check helpers before renaming.
+- Gate sensitive actions/data through verified auth
+  (appStore.requireLoginPermission() / auth service).
+- Do not parse raw theme_settings in components; normalize it in
+  [src/stores/app.ts](src/stores/app.ts).
+- Do not add ad-hoc caches for provider metadata, history records, or request
+  deduplication.
+- Keep nodeCardSize default as compact; mini is optional and must not replace
+  compact behavior.
+- Do not rename [komari-theme.json](komari-theme.json),
+  [docs/preview.png](docs/preview.png), runtime image contracts, or the established
+  ZIP naming/path logic without auditing their consumers.
 
-For detailed explanations and development paths, use [AIAGENTREADME.md](AIAGENTREADME.md).
+For detailed architecture and implementation guidance, use
+[AIAGENTREADME.md](AIAGENTREADME.md).

@@ -17,8 +17,9 @@ import { loadPingRecordsWithTasks } from '@/services/history.service'
 import { loadPingMetricStats, loadPublicPingTasks, queryMetrics } from '@/services/metrics.service'
 import { useAppStore } from '@/stores/app'
 import { ACCESSIBLE_LINE_TYPES, getChartSeriesPalette } from '@/utils/chartPalette'
-import { isPingMetric, normalizeMetricSeriesList, orderPingTasksByBackend, PING_LATENCY_METRIC, PING_LOSS_METRIC, pingTaskId, pingTaskName } from '@/utils/metricSeries'
+import { normalizeMetricSeriesList, orderPingTasksByBackend, PING_LATENCY_METRIC, PING_LOSS_METRIC, pingTaskId, pingTaskName } from '@/utils/metricSeries'
 import { smoothPingChartDisplayRows } from '@/utils/pingChartSmoothing'
+import { normalizePingMetricSamples } from '@/utils/pingMetricSamples'
 import { createNextAlignedPingTimeWindow, createPingTimeWindow, isPingTimestampInWindow, parsePingTimestampMs } from '@/utils/pingTime'
 import '@/utils/echarts' // 共享 ECharts 配置
 
@@ -251,33 +252,34 @@ function normalizeMetricTask(stat: PingMetricTaskStats): PingChartTaskInfo {
   }
 }
 
-function buildMetricRecords(seriesList: MetricSeries[], nodeUuid: string, window: PingTimeWindow): PingRecord[] {
-  const records: PingRecord[] = []
-  const normalizedSeriesList = normalizeMetricSeriesList(seriesList).filter(isPingMetric)
-
-  for (const series of normalizedSeriesList) {
-    if (series.entity_id !== nodeUuid)
-      continue
-
-    const taskId = normalizeMetricTaskId(pingTaskId(series))
+function buildMetricRecords(
+  seriesList: MetricSeries[],
+  nodeUuid: string,
+  window: PingTimeWindow,
+): { records: PingRecord[], hasObservedData: boolean } {
+  const samples = normalizePingMetricSamples(seriesList, {
+    entityId: nodeUuid,
+    start: window.start,
+    end: window.end,
+  })
+  const records = samples.flatMap((sample) => {
+    const taskId = normalizeMetricTaskId(sample.taskId)
     if (!Number.isFinite(taskId))
-      continue
+      return []
 
-    for (const point of series.points) {
-      const timestamp = parsePingTimestampMs(point.time)
-      if (point.value === null || timestamp === null || !isPingTimestampInWindow(timestamp, window))
-        continue
+    return [{
+      client: sample.entityId,
+      task_id: taskId,
+      time: sample.time,
+      // Preserve a real full-loss/null bucket as an explicit chart gap.
+      value: sample.latency ?? -1,
+    }]
+  })
 
-      records.push({
-        client: series.entity_id,
-        task_id: taskId,
-        time: point.time,
-        value: point.value,
-      })
-    }
+  return {
+    records,
+    hasObservedData: samples.some(sample => sample.observed),
   }
-
-  return records.sort((a, b) => (parsePingTimestampMs(a.time) ?? 0) - (parsePingTimestampMs(b.time) ?? 0))
 }
 
 function getPingChartTimeWindow(): PingTimeWindow | null {
@@ -325,17 +327,23 @@ async function loadMetricPingPayload(
   const metricStats = statsResult.status === 'fulfilled'
     ? (statsResult.value.stats ?? []).filter(stat => stat.entity_id === nodeUuid)
     : []
+  const rawMetricSeries = metricsResult.status === 'fulfilled'
+    ? metricsResult.value.series
+    : []
   const metricSeries = metricsResult.status === 'fulfilled'
-    ? normalizeMetricSeriesList(metricsResult.value.series).filter(series => series.entity_id === nodeUuid && isPingMetric(series))
+    ? normalizeMetricSeriesList(rawMetricSeries).filter(series => (
+        series.entity_id === nodeUuid
+        && (series.metric_key === PING_LATENCY_METRIC || series.metric_key === PING_LOSS_METRIC)
+      ))
     : []
-  const metricRecords = metricsResult.status === 'fulfilled'
-    ? buildMetricRecords(metricSeries, nodeUuid, window)
-    : []
+  const metricRecordResult = metricsResult.status === 'fulfilled'
+    ? buildMetricRecords(rawMetricSeries, nodeUuid, window)
+    : { records: [], hasObservedData: false }
 
   // The Metric latency series is the authoritative chart data. Statistics are
   // supplementary metadata and can arrive later or omit loss fields, so they
   // must never cause a successful raw series to fall back to the legacy API.
-  if (!metricRecords.length)
+  if (!metricRecordResult.hasObservedData)
     return null
 
   const taskMap = new Map<number, PingChartTaskInfo>()
@@ -366,7 +374,7 @@ async function loadMetricPingPayload(
     : []
 
   return {
-    records: metricRecords,
+    records: metricRecordResult.records,
     tasks: orderPingTasksByBackend([...taskMap.values()], publicTasks),
   }
 }
@@ -492,7 +500,7 @@ const chartData = computed(() => {
 
 // ==================== 工具函数 ====================
 
-function formatTime(time: string, showDate: boolean): string {
+function formatTime(time: string | number, showDate: boolean): string {
   const timestamp = parsePingTimestampMs(time)
   if (timestamp === null)
     return '-'
@@ -504,7 +512,7 @@ function formatTime(time: string, showDate: boolean): string {
   return date.format('HH:mm')
 }
 
-function formatTimeForTooltip(time: string, hours: number): string {
+function formatTimeForTooltip(time: string | number, hours: number): string {
   const timestamp = parsePingTimestampMs(time)
   if (timestamp === null)
     return '-'
@@ -611,6 +619,7 @@ const pingChartOption = computed(() => {
   const taskList = selectedTasks.value
   const data = chartData.value
   const hours = selectedHours.value
+  const window = activeTimeWindow.value
 
   // 构建 series，确保颜色与卡片一致
   const series = taskList.map((task, index) => {
@@ -621,7 +630,14 @@ const pingChartOption = computed(() => {
     return {
       name: task.name,
       type: 'line' as const,
-      data: data.map(d => d[task.id] as number | null ?? null),
+      data: data.flatMap((row) => {
+        const timestamp = parsePingTimestampMs(row.time)
+        if (timestamp === null)
+          return []
+        const rawValue = row[task.id]
+        const value = typeof rawValue === 'number' && Number.isFinite(rawValue) ? rawValue : null
+        return [[timestamp, value] as [number, number | null]]
+      }),
       smooth: smoothPeaks.value ? 0.6 : false,
       showSymbol: false,
       connectNulls: false,
@@ -647,28 +663,32 @@ const pingChartOption = computed(() => {
     tooltip: {
       ...baseTooltipConfig.value,
       formatter: (params: unknown) => {
-        const p = params as Array<{ seriesName: string, value: number | null, dataIndex: number }>
+        const p = params as Array<{
+          seriesName: string
+          value: [number, number | null] | number | null
+        }>
         if (!p.length)
           return ''
         const firstParam = p[0]
         if (!firstParam)
           return ''
-        const rowData = data[firstParam.dataIndex]
-        if (!rowData)
+        const firstValue = firstParam.value
+        const timestamp = Array.isArray(firstValue) ? firstValue[0] : null
+        if (typeof timestamp !== 'number' || !Number.isFinite(timestamp))
           return ''
 
-        const time = rowData.time as string
-        const timeStr = formatTimeForTooltip(time, hours)
+        const timeStr = formatTimeForTooltip(timestamp, hours)
         let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
         html += '<div style="display:flex;flex-direction:column;gap:4px">'
 
         for (const item of p) {
-          if (item.value !== null && item.value !== undefined) {
+          const itemValue = Array.isArray(item.value) ? item.value[1] : item.value
+          if (typeof itemValue === 'number' && Number.isFinite(itemValue)) {
             // 通过任务名找到对应的任务ID，再获取颜色
             const task = tasks.value.find(t => t.name === item.seriesName)
             const color = task ? colorMap.get(task.id) || chartColors[0] : chartColors[0]
             const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:8px;flex-shrink:0"></span>`
-            html += `<div style="display:flex;align-items:center">${colorDot}<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item.seriesName}</span><span style="margin-left:auto;font-weight:600;margin-left:16px;font-variant-numeric:tabular-nums">${Math.round(item.value)} ms</span></div>`
+            html += `<div style="display:flex;align-items:center">${colorDot}<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item.seriesName}</span><span style="margin-left:auto;font-weight:600;margin-left:16px;font-variant-numeric:tabular-nums">${Math.round(itemValue)} ms</span></div>`
           }
         }
         html += '</div>'
@@ -687,12 +707,14 @@ const pingChartOption = computed(() => {
     },
     grid: chartMargin,
     xAxis: {
-      type: 'category',
-      data: data.map(d => formatTime(d.time as string, showDateInAxis.value)),
+      type: 'time',
+      min: window?.start,
+      max: window?.end,
       axisLabel: {
         fontSize: 11,
         color: chartThemeColors.value.textSecondary,
         margin: 12,
+        formatter: (value: number | string) => formatTime(value, showDateInAxis.value),
       },
       axisLine: {
         show: true,
@@ -759,6 +781,10 @@ onBeforeUnmount(() => {
     class="flex flex-col gap-4"
     data-ping-chart
     :data-ping-chart-smoothing="smoothPeaks ? 'enabled' : 'disabled'"
+    data-ping-chart-axis-type="time"
+    :data-ping-chart-window-start="activeTimeWindow?.start"
+    :data-ping-chart-window-end="activeTimeWindow?.end"
+    :data-ping-chart-record-count="remoteData.length"
   >
     <!-- 时间选择器 -->
     <div class="flex flex-col gap-2">

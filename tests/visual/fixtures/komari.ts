@@ -55,6 +55,8 @@ export interface NodeCardPingFixture {
    * browser cache or a persisted storage state.
    */
   sampleSchedule?: NodeCardPingScheduledSample[]
+  /** Exact paired Metric rollups for long-range chart/domain regressions. */
+  metricSamples?: PingMetricFixtureSample[]
   metricQueryOmitTaskIds?: number[]
   task202Exists?: boolean
   task202Assigned?: boolean
@@ -62,6 +64,17 @@ export interface NodeCardPingFixture {
   task202Loss?: number
   /** Sanitized shape observed in Komari 1.4.1 HAR responses. */
   komari141HarShape?: boolean
+}
+
+export interface PingMetricFixtureSample {
+  time: string | number
+  latency: number | null
+  /** Metric loss ratio (0..1), not a percentage. */
+  loss: number | null
+  latencyCount?: number
+  lossCount?: number
+  taskId?: number
+  client?: string
 }
 
 export interface NodeCardPingScheduledSample {
@@ -324,6 +337,51 @@ function buildNodeCardPingMetricResponse(
   const requested = Array.isArray(payload.metric_keys) ? payload.metric_keys.map(String) : ['ping.latency_ms', 'ping.loss']
   const uuid = typeof payload.entity_id === 'string' ? payload.entity_id : uuidFor(0)
   const taskIds = getFixturePingTaskIds(payload, fixture, fixture.metricQueryOmitTaskIds)
+  const requestedStart = typeof payload.start === 'string' ? Date.parse(payload.start) : Number.NEGATIVE_INFINITY
+  const requestedEnd = typeof payload.end === 'string' ? Date.parse(payload.end) : Number.POSITIVE_INFINITY
+  if (fixture.metricSamples) {
+    const samples = fixture.metricSamples
+      .map(sample => ({
+        ...sample,
+        timestamp: parseFixtureTimestamp(sample.time, 'metricSamples.time'),
+        taskId: sample.taskId ?? 202,
+        client: sample.client ?? uuid,
+      }))
+      .filter(sample => sample.client === uuid
+        && taskIds.includes(sample.taskId)
+        && sample.timestamp >= requestedStart
+        && sample.timestamp < requestedEnd)
+      .sort((left, right) => left.timestamp - right.timestamp)
+    const series = requested.flatMap((metricKey) => {
+      if (metricKey !== 'ping.latency_ms' && metricKey !== 'ping.loss')
+        return []
+      return taskIds.flatMap((taskId) => {
+        const taskSamples = samples.filter(sample => sample.taskId === taskId)
+        if (!taskSamples.length)
+          return []
+        return [{
+          metric_key: metricKey,
+          entity_id: uuid,
+          type: 'gauge',
+          tags: { task_id: String(taskId), task_name: taskId === 202 ? 'Fixture Hong Kong' : 'Fixture Tokyo' },
+          downsampled: true,
+          fill_empty: true,
+          count: taskSamples.length,
+          points: taskSamples.map(sample => ({
+            time: new Date(sample.timestamp).toISOString(),
+            value: metricKey === 'ping.loss' ? sample.loss : sample.latency,
+            count: metricKey === 'ping.loss' ? sample.lossCount : sample.latencyCount,
+          })),
+        }]
+      })
+    })
+    return {
+      start: typeof payload.start === 'string' ? payload.start : FIXED_NOW,
+      end: typeof payload.end === 'string' ? payload.end : FIXED_NOW,
+      series,
+      count: series.length,
+    }
+  }
   const scheduledSamples = resolveScheduledPingSamples(fixture, uuid, now)
   const points = buildNodeCardPingSamplePoints(fixture)
   const series = requested.flatMap((metricKey) => {
