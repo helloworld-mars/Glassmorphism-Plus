@@ -14,7 +14,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { CACHE_CONFIG } from '@/constants/cache'
 import { PING_RECORD_MAX_COUNT } from '@/constants/load'
 import { loadPingRecordsWithTasks } from '@/services/history.service'
-import { loadPingMetricStats, loadPublicPingTasks, queryMetrics } from '@/services/metrics.service'
+import { loadPingMetricStats, loadPublicPingTasks } from '@/services/metrics.service'
+import { loadPingMetricCoverage } from '@/services/pingMetricCoverage.service'
 import { useAppStore } from '@/stores/app'
 import { ACCESSIBLE_LINE_TYPES, getChartSeriesPalette } from '@/utils/chartPalette'
 import { normalizeMetricSeriesList, orderPingTasksByBackend, PING_LATENCY_METRIC, PING_LOSS_METRIC, pingTaskId, pingTaskName } from '@/utils/metricSeries'
@@ -309,7 +310,7 @@ async function loadMetricPingPayload(
 
   const [statsResult, metricsResult, publicTasksResult] = await Promise.allSettled([
     loadPingMetricStats({ entity_id: nodeUuid, ...metricRangeParams, max_points: PING_RECORD_MAX_COUNT }),
-    queryMetrics({
+    loadPingMetricCoverage({
       // The chart renders raw latency only, but requesting the paired raw loss
       // series lets the shared Metric window cache carry real 100%-loss
       // observations back to the matching NodeCard without inventing a value.
@@ -328,7 +329,7 @@ async function loadMetricPingPayload(
     ? (statsResult.value.stats ?? []).filter(stat => stat.entity_id === nodeUuid)
     : []
   const rawMetricSeries = metricsResult.status === 'fulfilled'
-    ? metricsResult.value.series
+    ? metricsResult.value.response.series
     : []
   const metricSeries = metricsResult.status === 'fulfilled'
     ? normalizeMetricSeriesList(rawMetricSeries).filter(series => (

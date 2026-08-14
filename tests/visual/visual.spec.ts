@@ -1,9 +1,13 @@
 import type { Locator, Page } from '@playwright/test'
+import type { MetricQueryParams, MetricQueryResponse } from '../../src/utils/rpc'
 import { readFileSync } from 'node:fs'
 import { expect, test } from '@playwright/test'
 import { getQueryMetricsRequestKey } from '../../src/services/metrics.service'
+import { loadPingMetricCoverage } from '../../src/services/pingMetricCoverage.service'
+import { RequestManager } from '../../src/services/request.service'
 import { comparePingTaskOrder, createPingTaskOrderMap, orderPingTasksByBackend } from '../../src/utils/metricSeries'
 import { smoothPingChartDisplayRows } from '../../src/utils/pingChartSmoothing'
+import { mergePingMetricCoverageResponses } from '../../src/utils/pingMetricCoverage'
 import { normalizePingMetricSamples } from '../../src/utils/pingMetricSamples'
 import { createPingTimeWindow, getPingTimeBucketIndex, parsePingTimestampMs } from '../../src/utils/pingTime'
 import { installKomariFixture, PRIMARY_NODE_UUID } from './fixtures/komari'
@@ -18,6 +22,74 @@ const STABLE_STYLE = `
   .earth-globe-host canvas,
   .earth-globe-canvas { opacity: 0 !important; }
 `
+
+interface CoverageTestSample {
+  time: string
+  latency: number | null
+  loss: number | null
+  count?: number
+  taskId?: number
+}
+
+function buildCoverageTestResponse(
+  start: string,
+  end: string,
+  intervalSeconds: number,
+  samples: CoverageTestSample[],
+  taskIds = [...new Set(samples.map(sample => sample.taskId ?? 202))],
+): MetricQueryResponse {
+  const series = ['ping.latency_ms', 'ping.loss'].flatMap(metricKey => taskIds.map((taskId) => {
+    const taskSamples = samples.filter(sample => (sample.taskId ?? 202) === taskId)
+    return {
+      metric_key: metricKey,
+      entity_id: PRIMARY_NODE_UUID,
+      tags: { task_id: String(taskId), task_name: `Task ${taskId}` },
+      downsampled: true,
+      fill_empty: true,
+      interval_seconds: intervalSeconds,
+      count: taskSamples.length,
+      points: taskSamples.map(sample => ({
+        time: sample.time,
+        value: metricKey === 'ping.loss' ? sample.loss : sample.latency,
+        count: sample.count ?? 1,
+      })),
+    }
+  }))
+
+  return {
+    start,
+    end,
+    series,
+    count: series.reduce((total, item) => total + item.points.length, 0),
+  }
+}
+
+function coverageTestParams(hours: number): MetricQueryParams {
+  const end = Date.parse('2026-08-13T08:00:00.000Z')
+  return {
+    metric_keys: ['ping.latency_ms', 'ping.loss'],
+    entity_id: PRIMARY_NODE_UUID,
+    start: new Date(end - hours * 3_600_000).toISOString(),
+    end: new Date(end).toISOString(),
+    max_points: 6000,
+    aggregation: 'avg',
+    downsample: true,
+    fill_empty: true,
+  }
+}
+
+function responseForCoverageRequest(params: MetricQueryParams, intervalSeconds: number, taskIds = [202]): MetricQueryResponse {
+  const start = String(params.start)
+  const end = String(params.end)
+  const sampleTime = new Date(Date.parse(start) + Math.min(intervalSeconds * 1000, 3_600_000)).toISOString()
+  return buildCoverageTestResponse(start, end, intervalSeconds, taskIds.map(taskId => ({
+    time: sampleTime,
+    taskId,
+    latency: 30 + taskId / 1000,
+    loss: 0,
+    count: intervalSeconds >= 3600 ? 60 : 1,
+  })), taskIds)
+}
 
 async function openStablePage(page: Page, path = '/', siteName = 'Komari Visual Lab'): Promise<void> {
   await page.goto(path)
@@ -308,6 +380,118 @@ test('Ping Metric request identities isolate 7-day, 14-day, and 30-day windows',
   expect(new Set([requestKey(168), requestKey(336), requestKey(720)]).size).toBe(3)
 })
 
+test('Ping multi-tier merge keeps coarse history, lets finer observations win, and preserves explicit outage gaps', () => {
+  const start = '2026-07-14T08:00:00.000Z'
+  const end = '2026-08-13T08:00:00.000Z'
+  const coarse = buildCoverageTestResponse(start, end, 86_400, [
+    { time: '2026-07-15T00:00:00.000Z', latency: 40, loss: 0, count: 1440 },
+    { time: '2026-08-07T00:00:00.000Z', latency: 20, loss: 0, count: 1440 },
+    { time: '2026-08-08T00:00:00.000Z', latency: 25, loss: 0, count: 1440 },
+    { time: '2026-08-07T00:00:00.000Z', latency: 18, loss: 0, count: 1440, taskId: 303 },
+  ])
+  const fine = buildCoverageTestResponse('2026-07-19T08:00:00.000Z', end, 3600, [
+    { time: '2026-08-07T00:00:00.000Z', latency: 31, loss: 0, count: 60 },
+    { time: '2026-08-08T00:00:00.000Z', latency: null, loss: 1, count: 60 },
+    { time: '2026-08-09T00:00:00.000Z', latency: 9, loss: 0, count: 60 },
+    { time: '2026-08-10T00:00:00.000Z', latency: 12, loss: 0, count: 60 },
+    { time: '2026-08-07T00:00:00.000Z', latency: 17, loss: 0, count: 60, taskId: 303 },
+  ])
+
+  const merged = mergePingMetricCoverageResponses([coarse, fine])
+  expect(merged.start).toBe(start)
+  expect(merged.end).toBe(end)
+
+  const task202 = normalizePingMetricSamples(merged.series, {
+    entityId: PRIMARY_NODE_UUID,
+    taskId: '202',
+  })
+  expect(task202.map(sample => sample.time)).toEqual([
+    '2026-07-15T00:00:00.000Z',
+    '2026-08-07T00:00:00.000Z',
+    '2026-08-08T00:00:00.000Z',
+    '2026-08-09T00:00:00.000Z',
+    '2026-08-10T00:00:00.000Z',
+  ])
+  expect(task202.map(sample => sample.latency)).toEqual([40, 31, null, 9, 12])
+  expect(task202[2]).toMatchObject({ loss: 1, observed: true })
+  expect(new Set(task202.map(sample => sample.timestamp)).size).toBe(task202.length)
+
+  const task303 = normalizePingMetricSamples(merged.series, {
+    entityId: PRIMARY_NODE_UUID,
+    taskId: '303',
+  })
+  expect(task303).toHaveLength(1)
+  expect(task303[0]?.latency).toBe(17)
+
+  const smoothed = smoothPingChartDisplayRows(task202.map(sample => ({ time: sample.time, 202: sample.latency })), [202])
+  expect(smoothed[2]?.[202]).toBeNull()
+  expect(smoothed[3]?.[202]).toBe(9)
+})
+
+test('Ping long-range loader adapts to custom retention with a bounded batched request budget', async () => {
+  const runProfile = async (
+    outerHours: number,
+    intervalForHours: (hours: number) => number,
+    taskIds = [202],
+  ) => {
+    const calls: number[] = []
+    const result = await loadPingMetricCoverage(coverageTestParams(outerHours), async (params) => {
+      const hours = readPingRangeHours(params as Record<string, unknown>)
+      calls.push(hours)
+      return responseForCoverageRequest(params, intervalForHours(hours), taskIds)
+    })
+    return { calls, result }
+  }
+
+  const defaultRetention = await runProfile(720, hours => hours > 600 ? 86_400 : 3600, Array.from({ length: 12 }, (_, index) => 200 + index))
+  expect(defaultRetention.calls).toEqual([720, 600])
+  expect(defaultRetention.result.requests).toHaveLength(2)
+  expect(defaultRetention.result.response.series).toHaveLength(24)
+
+  const shorterRetention = await runProfile(719, hours => hours > 300 ? 86_400 : 3600)
+  expect(shorterRetention.calls).toEqual([719, 600, 300])
+  expect(shorterRetention.result.requests).toHaveLength(3)
+
+  const shorterRetentionCacheHit = await runProfile(719, hours => hours > 300 ? 86_400 : 3600)
+  expect(shorterRetentionCacheHit.calls).toEqual([719, 300])
+  expect(shorterRetentionCacheHit.result.requests).toHaveLength(2)
+
+  const completeDailyWithFineRecent = await runProfile(718, hours => hours > 600 ? 86_400 : 3600)
+  expect(completeDailyWithFineRecent.calls).toEqual([718, 600])
+  expect(completeDailyWithFineRecent.result.response.series.every(series => series.points.length >= 1)).toBe(true)
+
+  const sparseDailyWithoutFineTier = await runProfile(717, () => 86_400)
+  expect(sparseDailyWithoutFineTier.calls).toEqual([717, 600, 300, 150])
+  expect(sparseDailyWithoutFineTier.result.requests).toHaveLength(4)
+
+  const fourteenDays = await runProfile(336, () => 3600)
+  expect(fourteenDays.calls).toEqual([336])
+  expect(fourteenDays.result.requests).toHaveLength(1)
+})
+
+test('identical Ping Metric segments share the existing in-flight RequestManager promise', async () => {
+  const manager = new RequestManager()
+  const key = getQueryMetricsRequestKey(coverageTestParams(720))
+  let executions = 0
+  let resolveTask: ((value: string) => void) | undefined
+  const taskResult = new Promise<string>((resolve) => {
+    resolveTask = resolve
+  })
+  const task = async () => {
+    executions += 1
+    return taskResult
+  }
+
+  const first = manager.run(key, task, { timeout: 1000, retryAttempts: 0 })
+  const second = manager.run(key, task, { timeout: 1000, retryAttempts: 0 })
+  expect(second).toBe(first)
+  expect(executions).toBe(1)
+  resolveTask?.('ok')
+  await expect(first).resolves.toBe('ok')
+  await expect(second).resolves.toBe('ok')
+  expect(executions).toBe(1)
+})
+
 test('Ping modal and detail restore the smoothing control without changing the raw data contract', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await installKomariFixture(page, { nodeCardPingFixture: { metric: 'valid' } })
@@ -356,16 +540,22 @@ test('Ping-only 7-day and 14-day ranges use their own Metric windows and do not 
   const rangeTabs = dialog.locator('[data-ping-chart] [role="tab"]')
   await expect(rangeTabs).toHaveText(['1 小时', '6 小时', '12 小时', '1 天', '7 天', '14 天', '30 天', '自定义'])
 
+  for (const [label, hours] of [['6 小时', 6], ['12 小时', 12], ['1 天', 24], ['7 天', 168], ['14 天', 336], ['1 小时', 1]] as const) {
+    pingMetricCalls.length = 0
+    await rangeTabs.getByText(label, { exact: true }).click()
+    await expect.poll(() => pingMetricCalls.map(readPingRangeHours)).toEqual([hours])
+  }
+
   pingMetricCalls.length = 0
   await rangeTabs.getByText('7 天', { exact: true }).click()
-  await expect.poll(() => pingMetricCalls.some(params => readPingRangeHours(params) === 168)).toBe(true)
-  const sevenDay = pingMetricCalls.find(params => readPingRangeHours(params) === 168)!
+  await expect.poll(() => pingMetricCalls.map(readPingRangeHours)).toEqual([168])
+  const sevenDay = pingMetricCalls[0]!
   expect(sevenDay.max_points).toBe(6000)
   expect(sevenDay.metric_keys).toEqual(['ping.latency_ms', 'ping.loss'])
 
   pingMetricCalls.length = 0
   await rangeTabs.getByText('14 天', { exact: true }).click()
-  await expect.poll(() => pingMetricCalls.some(params => readPingRangeHours(params) === 336)).toBe(true)
+  await expect.poll(() => pingMetricCalls.map(readPingRangeHours)).toEqual([336])
 
   pingMetricCalls.length = 0
   await rangeTabs.getByText('30 天', { exact: true }).click()
@@ -396,7 +586,58 @@ test('Ping range availability respects the public Ping retention setting', async
   await expect(rangeTabs).toHaveText(['1 小时', '6 小时', '12 小时', '1 天', '7 天', '自定义'])
 })
 
-test('30-day Ping keeps the requested domain when only the final seven daily rollups exist', async ({ page }) => {
+test('a long custom Ping range reuses the bounded coverage loader without changing shorter presets', async ({ page }) => {
+  const queryCalls: Array<Record<string, unknown>> = []
+  page.on('request', (request) => {
+    if (!request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
+    if (payload?.method === 'public:queryMetrics') {
+      const keys = Array.isArray(payload.params?.metric_keys) ? payload.params.metric_keys.map(String) : []
+      if (keys.includes('ping.latency_ms'))
+        queryCalls.push(payload.params ?? {})
+    }
+  })
+  const coarse = [{ time: '2026-07-15T00:00:00.000Z', latency: 40, loss: 0, latencyCount: 1440, lossCount: 1440 }]
+  const fine = [{ time: '2026-08-01T00:00:00.000Z', latency: 30, loss: 0, latencyCount: 60, lossCount: 60 }]
+  await installKomariFixture(page, {
+    clockNow: '2026-08-13T08:00:00.000Z',
+    pingRecordPreserveTime: 720,
+    nodeCardPingFixture: {
+      metric: 'valid',
+      metricRangeSamples: [
+        { minHours: 601, intervalSeconds: 86_400, samples: coarse },
+        { maxHours: 600, intervalSeconds: 3600, samples: fine },
+      ],
+    },
+  })
+  await openStablePage(page)
+  const dialog = await openPrimaryPingDialog(page)
+  const chart = dialog.locator('[data-ping-chart]')
+  await chart.locator('[role="tab"]').getByText('自定义', { exact: true }).click()
+  const customInputs = chart.locator('input[type="datetime-local"]')
+  await expect(customInputs.nth(0)).not.toHaveValue('')
+  await expect(customInputs.nth(1)).not.toHaveValue('')
+  await customInputs.nth(0).fill('2026-07-14T08:00')
+  await customInputs.nth(0).press('Tab')
+  await customInputs.nth(1).fill('2026-08-13T08:00')
+  await customInputs.nth(1).press('Tab')
+  await expect(customInputs.nth(0)).toHaveValue('2026-07-14T08:00')
+  await expect(customInputs.nth(1)).toHaveValue('2026-08-13T08:00')
+  await expect(chart).not.toContainText('结束时间必须晚于开始时间')
+  await expect(chart.getByRole('button', { name: '应用', exact: true })).toBeEnabled()
+  queryCalls.length = 0
+  await chart.getByRole('button', { name: '应用', exact: true }).click()
+
+  await expect.poll(() => queryCalls.map(readPingRangeHours)).toEqual([720, 600])
+  await expect.poll(async () => {
+    const start = Number(await chart.getAttribute('data-ping-chart-window-start'))
+    const end = Number(await chart.getAttribute('data-ping-chart-window-end'))
+    return (end - start) / 3_600_000
+  }).toBe(720)
+})
+
+test('30-day Ping stitches sparse daily history with the retained hourly tier in both modal and detail', async ({ page }) => {
   const queryCalls: Array<Record<string, unknown>> = []
   const legacyCalls: Array<Record<string, unknown>> = []
   page.on('request', (request) => {
@@ -414,35 +655,137 @@ test('30-day Ping keeps the requested domain when only the final seven daily rol
     }
   })
 
-  const metricSamples = Array.from({ length: 7 }, (_, index) => ({
-    time: new Date(Date.UTC(2026, 7, 7 + index)).toISOString(),
-    taskId: 202,
-    latency: 30 + index / 10,
-    loss: 0,
-    latencyCount: 420,
-    lossCount: 420,
-  }))
+  const coarseSamples = [
+    ...Array.from({ length: 5 }, (_, index) => ({
+      time: new Date(Date.UTC(2026, 6, 15 + index)).toISOString(),
+      taskId: 202,
+      latency: 40 + index,
+      loss: 0,
+      latencyCount: 1440,
+      lossCount: 1440,
+    })),
+    ...Array.from({ length: 7 }, (_, index) => ({
+      time: new Date(Date.UTC(2026, 7, 7 + index)).toISOString(),
+      taskId: 202,
+      latency: 30 + index / 10,
+      loss: 0,
+      latencyCount: 1440,
+      lossCount: 1440,
+    })),
+  ]
+  const fineStart = Date.parse('2026-07-31T23:00:00.000Z')
+  const fineEnd = Date.parse('2026-08-13T08:00:00.000Z')
+  const fineSamples = Array.from({ length: (fineEnd - fineStart) / 3_600_000 }, (_, index) => {
+    const timestamp = fineStart + index * 3_600_000
+    const outage = timestamp >= Date.parse('2026-08-07T08:00:00.000Z')
+      && timestamp < Date.parse('2026-08-07T14:00:00.000Z')
+    const trueLow = timestamp === Date.parse('2026-08-07T14:00:00.000Z')
+      ? 9
+      : timestamp === Date.parse('2026-08-07T15:00:00.000Z') ? 12 : null
+    return {
+      time: new Date(timestamp).toISOString(),
+      taskId: 202,
+      latency: outage ? null : (trueLow ?? 30 + Math.sin(index / 12)),
+      loss: outage ? 1 : 0,
+      latencyCount: 60,
+      lossCount: 60,
+    }
+  })
+
   await installKomariFixture(page, {
     clockNow: '2026-08-13T08:00:00.000Z',
     pingRecordPreserveTime: 720,
-    nodeCardPingFixture: { metric: 'valid', metricSamples },
+    nodeCardPingFixture: {
+      metric: 'valid',
+      metricRangeSamples: [
+        { minHours: 601, intervalSeconds: 86_400, samples: coarseSamples },
+        { maxHours: 600, intervalSeconds: 3600, samples: fineSamples },
+      ],
+    },
   })
   await openStablePage(page)
   const dialog = await openPrimaryPingDialog(page)
   queryCalls.length = 0
   legacyCalls.length = 0
   await dialog.locator('[data-ping-chart] [role="tab"]').getByText('30 天', { exact: true }).click()
-  await expect.poll(() => queryCalls.some(params => readPingRangeHours(params) === 720)).toBe(true)
+  await expect.poll(() => queryCalls.map(readPingRangeHours)).toEqual([720, 600])
 
   const chart = dialog.locator('[data-ping-chart]')
   await expect(chart).toHaveAttribute('data-ping-chart-axis-type', 'time')
-  await expect(chart).toHaveAttribute('data-ping-chart-record-count', '7')
+  await expect(chart).toHaveAttribute('data-ping-chart-record-count', '302')
   await expect.poll(async () => {
     const start = Number(await chart.getAttribute('data-ping-chart-window-start'))
     const end = Number(await chart.getAttribute('data-ping-chart-window-end'))
     return (end - start) / 3_600_000
   }).toBe(720)
-  expect(legacyCalls.some(params => Number(params.hours) === 720)).toBe(false)
+  expect(legacyCalls.filter(call => Number(call.hours) === 720)).toHaveLength(0)
+
+  await dialog.getByRole('button', { name: '关闭' }).click()
+  await page.goto(`/instance/${PRIMARY_NODE_UUID}`)
+  await expect(page.getByText('硬件信息')).toBeVisible()
+  const detailChart = page.locator('[data-ping-chart]').first()
+  await detailChart.locator('[role="tab"]').getByText('30 天', { exact: true }).click()
+  await expect(detailChart).toHaveAttribute('data-ping-chart-record-count', '302')
+  await expect.poll(async () => {
+    const start = Number(await detailChart.getAttribute('data-ping-chart-window-start'))
+    const end = Number(await detailChart.getAttribute('data-ping-chart-window-end'))
+    return (end - start) / 3_600_000
+  }).toBe(720)
+  await expect.poll(() => queryCalls.map(readPingRangeHours).filter(hours => hours > 1)).toEqual([720, 600, 720, 600])
+  expect(legacyCalls.filter(call => Number(call.hours) === 720)).toHaveLength(0)
+})
+
+test('rapid 14-day, 30-day, 7-day, 30-day switching rejects stale multi-tier responses', async ({ page }) => {
+  const sample = (time: string, latency: number) => ({
+    time,
+    taskId: 202,
+    latency,
+    loss: 0,
+    latencyCount: 60,
+    lossCount: 60,
+  })
+  await installKomariFixture(page, {
+    clockNow: '2026-08-13T08:00:00.000Z',
+    pingRecordPreserveTime: 720,
+    nodeCardPingFixture: {
+      metric: 'valid',
+      metricQueryDelayMsByHours: { 168: 200, 336: 300, 600: 20, 720: 20 },
+      metricRangeSamples: [
+        { maxHours: 168, intervalSeconds: 3600, samples: [sample('2026-08-12T00:00:00.000Z', 7)] },
+        { minHours: 169, maxHours: 336, intervalSeconds: 3600, samples: [
+          sample('2026-08-01T00:00:00.000Z', 14),
+          sample('2026-08-02T00:00:00.000Z', 15),
+        ] },
+        { minHours: 337, maxHours: 600, intervalSeconds: 3600, samples: [
+          sample('2026-07-25T00:00:00.000Z', 30),
+          sample('2026-07-26T00:00:00.000Z', 31),
+          sample('2026-07-27T00:00:00.000Z', 32),
+        ] },
+        { minHours: 601, intervalSeconds: 86_400, samples: [
+          sample('2026-07-15T00:00:00.000Z', 40),
+          sample('2026-07-16T00:00:00.000Z', 41),
+          sample('2026-07-17T00:00:00.000Z', 42),
+          sample('2026-07-18T00:00:00.000Z', 43),
+        ] },
+      ],
+    },
+  })
+  await openStablePage(page)
+  const dialog = await openPrimaryPingDialog(page)
+  const chart = dialog.locator('[data-ping-chart]')
+  const tabs = chart.locator('[role="tab"]')
+
+  await tabs.getByText('14 天', { exact: true }).click()
+  await tabs.getByText('30 天', { exact: true }).click()
+  await tabs.getByText('7 天', { exact: true }).click()
+  await tabs.getByText('30 天', { exact: true }).click()
+
+  await expect.poll(async () => {
+    const start = Number(await chart.getAttribute('data-ping-chart-window-start'))
+    const end = Number(await chart.getAttribute('data-ping-chart-window-end'))
+    return (end - start) / 3_600_000
+  }).toBe(720)
+  await expect(chart).toHaveAttribute('data-ping-chart-record-count', '7')
 })
 
 test('mobile viewport keeps Ping dialogs and route transitions above the page canvas without stale body lock', async ({ page }) => {
@@ -493,13 +836,13 @@ test('brand metadata and homepage footer retain current and original attribution
     name: 'Komari Glassmorphism Plus',
     short: 'glassmorphism-plus',
     description: 'A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.',
-    version: '1.3.5',
+    version: '1.3.6',
     author: 'helloworld-mars',
     url: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(packageMetadata).toMatchObject({
     name: 'komari-theme-glassmorphism-plus',
-    version: '1.3.5',
+    version: '1.3.6',
     homepage: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(themeManifest.short).toMatch(/^[\w-]+$/)
@@ -529,7 +872,7 @@ test('brand metadata and homepage footer retain current and original attribution
 
   const footer = page.locator('footer')
   await expect(footer.getByRole('link', { name: 'Glassmorphism Plus' })).toHaveAttribute('href', 'https://github.com/helloworld-mars/Glassmorphism-Plus')
-  await expect(footer.getByText('v1.3.5 · helloworld-mars', { exact: true }).first()).toBeVisible()
+  await expect(footer.getByText('v1.3.6 · helloworld-mars', { exact: true }).first()).toBeVisible()
   await expect(footer.getByRole('link', { name: 'Based on the original theme by sanrokamlan' }))
     .toHaveAttribute('href', 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism')
   await expect(footer).not.toContainText('unknown')

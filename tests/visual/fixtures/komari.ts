@@ -57,6 +57,10 @@ export interface NodeCardPingFixture {
   sampleSchedule?: NodeCardPingScheduledSample[]
   /** Exact paired Metric rollups for long-range chart/domain regressions. */
   metricSamples?: PingMetricFixtureSample[]
+  /** Range-dependent rollup responses used to emulate Komari's selected tier. */
+  metricRangeSamples?: PingMetricRangeFixture[]
+  /** Optional real-time delay by rounded requested hours for stale-response tests. */
+  metricQueryDelayMsByHours?: Record<string, number>
   metricQueryOmitTaskIds?: number[]
   task202Exists?: boolean
   task202Assigned?: boolean
@@ -75,6 +79,13 @@ export interface PingMetricFixtureSample {
   lossCount?: number
   taskId?: number
   client?: string
+}
+
+export interface PingMetricRangeFixture {
+  minHours?: number
+  maxHours?: number
+  intervalSeconds: number
+  samples: PingMetricFixtureSample[]
 }
 
 export interface NodeCardPingScheduledSample {
@@ -339,11 +350,19 @@ function buildNodeCardPingMetricResponse(
   const taskIds = getFixturePingTaskIds(payload, fixture, fixture.metricQueryOmitTaskIds)
   const requestedStart = typeof payload.start === 'string' ? Date.parse(payload.start) : Number.NEGATIVE_INFINITY
   const requestedEnd = typeof payload.end === 'string' ? Date.parse(payload.end) : Number.POSITIVE_INFINITY
-  if (fixture.metricSamples) {
-    const samples = fixture.metricSamples
+  const requestedHours = Number.isFinite(requestedStart) && Number.isFinite(requestedEnd)
+    ? (requestedEnd - requestedStart) / 3_600_000
+    : 0
+  const selectedRange = fixture.metricRangeSamples?.find(range => (
+    (range.minHours === undefined || requestedHours >= range.minHours)
+    && (range.maxHours === undefined || requestedHours <= range.maxHours)
+  ))
+  const configuredSamples = selectedRange?.samples ?? fixture.metricSamples
+  if (configuredSamples) {
+    const samples = configuredSamples
       .map(sample => ({
         ...sample,
-        timestamp: parseFixtureTimestamp(sample.time, 'metricSamples.time'),
+        timestamp: parseFixtureTimestamp(sample.time, 'configuredSamples.time'),
         taskId: sample.taskId ?? 202,
         client: sample.client ?? uuid,
       }))
@@ -366,6 +385,7 @@ function buildNodeCardPingMetricResponse(
           tags: { task_id: String(taskId), task_name: taskId === 202 ? 'Fixture Hong Kong' : 'Fixture Tokyo' },
           downsampled: true,
           fill_empty: true,
+          interval_seconds: selectedRange?.intervalSeconds ?? 60,
           count: taskSamples.length,
           points: taskSamples.map(sample => ({
             time: new Date(sample.timestamp).toISOString(),
@@ -398,6 +418,9 @@ function buildNodeCardPingMetricResponse(
           tags: fixture.komari141HarShape
             ? { task_id: String(taskId) }
             : { task_id: String(taskId), task_name: taskId === 202 ? 'Fixture Hong Kong' : 'Fixture Tokyo' },
+          downsampled: false,
+          interval_seconds: 60,
+          count: taskSamples.length,
           points: taskSamples.map(sample => ({
             time: sample.time,
             value: metricKey === 'ping.loss' ? sample.loss / 100 : sample.latency,
@@ -418,6 +441,9 @@ function buildNodeCardPingMetricResponse(
         tags: fixture.komari141HarShape
           ? { task_id: String(taskId) }
           : { task_id: String(taskId), task_name: taskId === 202 ? 'Fixture Hong Kong' : 'Fixture Tokyo' },
+        downsampled: false,
+        interval_seconds: 60,
+        count: points.length,
         points: points.map(point => ({
           time: point.time,
           value: metricKey === 'ping.loss' ? loss : latency,
@@ -758,6 +784,15 @@ async function handleRpc(
   if (isPingRequest)
     await pingResponseGate?.wait()
 
+  if (payload.method === 'public:queryMetrics' && nodeCardPingFixture?.metricQueryDelayMsByHours) {
+    const start = typeof payload.params?.start === 'string' ? Date.parse(payload.params.start) : Number.NaN
+    const end = typeof payload.params?.end === 'string' ? Date.parse(payload.params.end) : Number.NaN
+    const hours = Number.isFinite(start) && Number.isFinite(end) ? Math.round((end - start) / 3_600_000) : 0
+    const delay = nodeCardPingFixture.metricQueryDelayMsByHours[String(hours)] ?? 0
+    if (delay > 0)
+      await new Promise(resolve => setTimeout(resolve, delay))
+  }
+
   const responseAt = isPingRequest ? await getNow() : requestAt
   const pingRecords = nodeCardPingFixture
     ? buildNodeCardPingRecords(uuid, nodeCardPingFixture, responseAt)
@@ -944,8 +979,24 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     const NativeDate = Date
     let currentTime = new NativeDate(fixedNow).getTime()
     class FixedDate extends NativeDate {
-      constructor(...args: ConstructorParameters<typeof Date>) {
-        super(args.length ? args[0] : currentTime)
+      constructor(...args: unknown[]) {
+        if (args.length === 0) {
+          super(currentTime)
+        }
+        else if (args.length === 1) {
+          super(args[0] as string | number)
+        }
+        else {
+          super(
+            Number(args[0]),
+            Number(args[1]),
+            args[2] === undefined ? 1 : Number(args[2]),
+            args[3] === undefined ? 0 : Number(args[3]),
+            args[4] === undefined ? 0 : Number(args[4]),
+            args[5] === undefined ? 0 : Number(args[5]),
+            args[6] === undefined ? 0 : Number(args[6]),
+          )
+        }
       }
 
       static now() {

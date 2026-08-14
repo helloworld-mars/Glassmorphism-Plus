@@ -38,6 +38,18 @@ export const CACHE_CONFIG = {
       heartbeat: TIME_MS.minute,
       staleAfterIntervals: 4,
     },
+    metricCoverage: {
+      schemaVersion: 1,
+      longRangeThresholdHours: 14 * 24,
+      defaultFineWindowHintHours: 600,
+      minimumProbeWindowHours: 24,
+      maxSupplementalProbes: 3,
+      maximumFineIntervalSeconds: 60 * 60,
+      capability: {
+        maxSize: 8,
+        ttl: 5 * TIME_MS.minute,
+      },
+    },
   },
   cleanup: {
     interval: 5 * TIME_MS.minute,
