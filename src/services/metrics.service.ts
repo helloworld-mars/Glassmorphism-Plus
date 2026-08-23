@@ -45,7 +45,7 @@ function cachePart(value: unknown): string {
 
 function shouldRetryMetricRequest(error: unknown): boolean {
   if (error instanceof RpcError)
-    return error.code !== 401 && error.code !== 403 && error.code !== -32601
+    return error.code !== 401 && error.code !== 403 && error.code !== -32601 && error.code !== -32602
   return true
 }
 
@@ -250,6 +250,9 @@ export function getQueryMetricsRequestKey(params: MetricQueryParams): string {
     cachePart(params.end ?? params.end_time),
     cachePart(params.max_points ?? params.downsample_points),
     cachePart(params.aggregation ?? params.downsample_algorithm ?? params.algorithm),
+    cachePart(params.aggregation_by_metric),
+    cachePart(params.downsample_algorithm_by_metric),
+    cachePart(params.algorithm_by_metric),
     cachePart(params.tags),
     cachePart(params.downsample ?? params.server_downsample),
     cachePart(params.fill_empty),

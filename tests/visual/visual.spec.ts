@@ -1,5 +1,6 @@
 import type { Locator, Page } from '@playwright/test'
 import type { MetricQueryParams, MetricQueryResponse } from '../../src/utils/rpc'
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { expect, test } from '@playwright/test'
 import { getQueryMetricsRequestKey } from '../../src/services/metrics.service'
@@ -22,6 +23,37 @@ const STABLE_STYLE = `
   .earth-globe-host canvas,
   .earth-globe-canvas { opacity: 0 !important; }
 `
+
+test('Plus documentation keeps its own version identity and preserves upstream attribution', () => {
+  const readRootFile = (name: string) => readFileSync(new URL(`../../${name}`, import.meta.url), 'utf8')
+  const readme = readRootFile('README.md')
+  const changelog = readRootFile('CHANGELOG.md')
+  const upstream = readRootFile('UPSTREAM.md')
+  const credits = readRootFile('CREDITS.md')
+  const license = readRootFile('LICENSE')
+
+  expect(readme).toContain('# 🌌 Komari Glassmorphism Plus')
+  expect(readme).toContain('当前 Plus 版本')
+  expect(readme).toContain('**v1.4.0**')
+  expect(readme).toContain('sanrokamlan Glassmorphism v3.3.7')
+  expect(readme).toContain('v1.4.0 GitHub Release 的 installer asset 数量为 0')
+  expect(readme).toContain('Source code (zip)')
+  expect(readme).not.toMatch(/^#{2,}\s+(?:\S.*)?v3\.\d/m)
+
+  const changelogVersions = Array.from(changelog.matchAll(/^## \[([^\]]+)\]/gm), match => match[1])
+  expect(changelogVersions).toEqual(['1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
+  expect(upstream).toContain('Current upstream baseline')
+  expect(upstream).toContain('v3.3.7')
+  expect(credits).toContain('helloworld-mars')
+  expect(credits).toContain('sanrokamlan')
+  expect(credits).toContain('Tony Liu')
+  expect(createHash('sha256').update(license).digest('hex').toUpperCase()).toBe('4703F29BF392157FC005B92C18AE015C270BEEC13EF33A4A603D28A1B4E166D8')
+
+  for (const document of [readme, changelog, upstream, credits]) {
+    expect(document).not.toContain('C:\\Users\\')
+    expect(document).not.toContain('.codex/attachments')
+  }
+})
 
 interface CoverageTestSample {
   time: string
@@ -378,6 +410,40 @@ test('Ping Metric request identities isolate 7-day, 14-day, and 30-day windows',
   })
 
   expect(new Set([requestKey(168), requestKey(336), requestKey(720)]).size).toBe(3)
+})
+
+test('Metric request identities isolate per-metric aggregation maps deterministically', () => {
+  const base: MetricQueryParams = {
+    metric_keys: ['cpu.usage', 'net.total.up', 'net.total.down'],
+    entity_id: PRIMARY_NODE_UUID,
+    hours: 24,
+    max_points: 700,
+    aggregation: 'avg',
+    downsample: true,
+    fill_empty: true,
+  }
+  const lastCounters = {
+    'net.total.up': 'last',
+    'net.total.down': 'last',
+  } as const
+  const reversedLastCounters = {
+    'net.total.down': 'last',
+    'net.total.up': 'last',
+  } as const
+
+  const baseKey = getQueryMetricsRequestKey(base)
+  const lastKey = getQueryMetricsRequestKey({ ...base, aggregation_by_metric: lastCounters })
+  const reversedKey = getQueryMetricsRequestKey({ ...base, aggregation_by_metric: reversedLastCounters })
+  const avgKey = getQueryMetricsRequestKey({
+    ...base,
+    aggregation_by_metric: { 'net.total.up': 'avg', 'net.total.down': 'avg' },
+  })
+  const aliasKey = getQueryMetricsRequestKey({ ...base, algorithm_by_metric: lastCounters })
+
+  expect(lastKey).not.toBe(baseKey)
+  expect(lastKey).not.toBe(avgKey)
+  expect(lastKey).toBe(reversedKey)
+  expect(aliasKey).not.toBe(lastKey)
 })
 
 test('Ping multi-tier merge keeps coarse history, lets finer observations win, and preserves explicit outage gaps', () => {
@@ -836,13 +902,13 @@ test('brand metadata and homepage footer retain current and original attribution
     name: 'Komari Glassmorphism Plus',
     short: 'glassmorphism-plus',
     description: 'A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.',
-    version: '1.3.6',
+    version: '1.4.0',
     author: 'helloworld-mars',
     url: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(packageMetadata).toMatchObject({
     name: 'komari-theme-glassmorphism-plus',
-    version: '1.3.6',
+    version: '1.4.0',
     homepage: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(themeManifest.short).toMatch(/^[\w-]+$/)
@@ -872,7 +938,7 @@ test('brand metadata and homepage footer retain current and original attribution
 
   const footer = page.locator('footer')
   await expect(footer.getByRole('link', { name: 'Glassmorphism Plus' })).toHaveAttribute('href', 'https://github.com/helloworld-mars/Glassmorphism-Plus')
-  await expect(footer.getByText('v1.3.6 · helloworld-mars', { exact: true }).first()).toBeVisible()
+  await expect(footer.getByText('v1.4.0 · helloworld-mars', { exact: true }).first()).toBeVisible()
   await expect(footer.getByRole('link', { name: 'Based on the original theme by sanrokamlan' }))
     .toHaveAttribute('href', 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism')
   await expect(footer).not.toContainText('unknown')
@@ -967,6 +1033,82 @@ test('home tiled layout desktop', async ({ page }) => {
   await expectNodeMetricIcons(page)
   await expect(page).toHaveScreenshot('home-tiled-desktop.png', { fullPage: false })
 })
+
+const FULL_GENERAL_CARD_ORDER = [
+  'currentTime',
+  'memory',
+  'disk',
+  'remainingValue',
+  'monthlyCost',
+  'totalTraffic',
+  'uploadSpeed',
+  'downloadSpeed',
+  'onlineNodes',
+  'offlineNodes',
+  'avgCpu',
+  'avgGpu',
+  'avgLoad',
+  'swap',
+  'processes',
+  'connections',
+  'cpuCores',
+  'gpuNodes',
+  'gpuPeakNode',
+  'trafficQuota',
+  'trafficPeak',
+  'uploadPeakNode',
+  'downloadPeakNode',
+  'highLoadNodes',
+  'expiringNodes',
+  'trafficWarnings',
+  'connectionPeakNode',
+  'regionDistribution',
+  'systemDistribution',
+  'virtualizationDistribution',
+  'yearlyCost',
+]
+
+for (const scenario of [
+  {
+    name: 'tiled basic light desktop',
+    viewport: { width: 1280, height: 720 },
+    options: { earthRenderer: 'tiled' as const, generalCardPreset: '基础' },
+    expected: ['memory', 'disk', 'remainingValue', 'totalTraffic', 'uploadSpeed', 'downloadSpeed'],
+  },
+  {
+    name: 'tiled full dark mobile',
+    viewport: { width: 390, height: 844 },
+    options: { earthRenderer: 'tiled' as const, generalCardPreset: '完整', dark: true },
+    expected: FULL_GENERAL_CARD_ORDER,
+  },
+  {
+    name: 'tiled custom ordered light desktop',
+    viewport: { width: 1280, height: 720 },
+    options: { earthRenderer: 'tiled' as const, generalCardPreset: '自定义', generalCardKeys: ['currentTime', 'offlineNodes', 'yearlyCost'] },
+    expected: ['currentTime', 'offlineNodes', 'yearlyCost'],
+  },
+  {
+    name: 'globe custom ordered dark desktop',
+    viewport: { width: 1280, height: 720 },
+    options: { earthRenderer: 'realistic' as const, generalCardPreset: '自定义', generalCardKeys: ['currentTime', 'offlineNodes', 'yearlyCost'], dark: true },
+    expected: ['currentTime', 'offlineNodes', 'yearlyCost'],
+  },
+  {
+    name: 'hidden-earth custom ordered light mobile',
+    viewport: { width: 390, height: 844 },
+    options: { hideEarth: true, generalCardPreset: '自定义', generalCardKeys: ['currentTime', 'offlineNodes', 'yearlyCost'] },
+    expected: ['currentTime', 'offlineNodes', 'yearlyCost'],
+  },
+]) {
+  test(`home summary cards honor the normalized configuration in ${scenario.name}`, async ({ page }) => {
+    await page.setViewportSize(scenario.viewport)
+    await installKomariFixture(page, scenario.options)
+    await openStablePage(page)
+
+    const keys = await page.locator('[data-general-card-key]').evaluateAll(elements => elements.map(element => element.getAttribute('data-general-card-key')))
+    expect(keys).toEqual(scenario.expected)
+  })
+}
 
 test('home mini card metric icons remain accessible', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
@@ -1107,6 +1249,107 @@ test('detail short history falls back when metric history omits CPU', async ({ p
     await loadRange.getByRole('tab').nth(tabIndex).click()
     await expect(cpuValue).toHaveText(/^\d+\.\d$/)
   }
+})
+
+test('detail historical Metric ranges keep gauges on avg and cumulative counters on last', async ({ page }) => {
+  const historyQueries: Record<string, unknown>[] = []
+  page.on('request', (request) => {
+    if (!request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
+    const metricKeys = Array.isArray(payload?.params?.metric_keys) ? payload.params.metric_keys.map(String) : []
+    if (payload?.method === 'public:queryMetrics' && metricKeys.includes('cpu.usage'))
+      historyQueries.push(payload.params ?? {})
+  })
+
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await installKomariFixture(page)
+  await openStablePage(page, `/instance/${PRIMARY_NODE_UUID}`)
+  const loadRange = page.locator('[data-load-chart-range]')
+
+  for (const tabIndex of [1, 2, 3, 4]) {
+    const previousCount = historyQueries.length
+    await loadRange.getByRole('tab').nth(tabIndex).click()
+    await expect.poll(() => historyQueries.length).toBeGreaterThan(previousCount)
+  }
+
+  const beforeCustom = historyQueries.length
+  await loadRange.getByRole('tab').nth(5).click()
+  await page.getByLabel('负载图开始时间').fill('2026-07-24T12:00')
+  await page.getByLabel('负载图结束时间').fill('2026-07-25T12:00')
+  await page.getByRole('button', { name: '应用', exact: true }).click()
+  await expect.poll(() => historyQueries.length).toBeGreaterThan(beforeCustom)
+
+  expect(historyQueries).toHaveLength(5)
+  for (const params of historyQueries) {
+    expect(params.aggregation).toBe('avg')
+    expect(params.aggregation_by_metric).toEqual({
+      'net.total.up': 'last',
+      'net.total.down': 'last',
+    })
+    expect(params.aggregation_by_metric).not.toHaveProperty('cpu.usage')
+    expect(params.aggregation_by_metric).not.toHaveProperty('memory.used')
+    expect(params.aggregation_by_metric).not.toHaveProperty('load.average')
+    expect(params.aggregation_by_metric).not.toHaveProperty('traffic.up')
+    expect(params.aggregation_by_metric).not.toHaveProperty('traffic.down')
+  }
+})
+
+test('detail cumulative counter query falls back once to Legacy when per-metric aggregation is unsupported', async ({ page }) => {
+  const calls: Array<{ method: string, params: Record<string, unknown> }> = []
+  page.on('request', (request) => {
+    if (!request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
+    if (payload?.method)
+      calls.push({ method: payload.method, params: payload.params ?? {} })
+  })
+
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await installKomariFixture(page, { loadMetricFixture: { rejectPerMetricAggregation: true } })
+  await openStablePage(page, `/instance/${PRIMARY_NODE_UUID}`)
+  await page.locator('[data-load-chart-range]').getByRole('tab').nth(1).click()
+
+  const cpuValue = page.locator('[data-load-chart-card="cpu"] [data-latest-cpu]')
+  await expect.poll(() => calls.filter(call => call.method === 'common:getRecords' && call.params.type === 'load').length).toBe(1)
+  await expect(cpuValue).toHaveText(/^\d+\.\d$/)
+  const mappedMetricCalls = calls.filter(call => call.method === 'public:queryMetrics' && call.params.aggregation_by_metric)
+  const legacyCalls = calls.filter(call => call.method === 'common:getRecords' && call.params.type === 'load')
+  expect(mappedMetricCalls).toHaveLength(1)
+  expect(legacyCalls).toHaveLength(1)
+})
+
+test('detail rapid range switching ignores a delayed older Metric response', async ({ page }) => {
+  const historyHours: number[] = []
+  page.on('request', (request) => {
+    if (!request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
+    const metricKeys = Array.isArray(payload?.params?.metric_keys) ? payload.params.metric_keys.map(String) : []
+    if (payload?.method === 'public:queryMetrics' && metricKeys.includes('cpu.usage') && typeof payload.params?.hours === 'number')
+      historyHours.push(payload.params.hours)
+  })
+
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await installKomariFixture(page, {
+    loadMetricFixture: {
+      delayMsByHours: { 168: 300, 720: 20 },
+      cpuValueByHours: { 168: 7, 720: 30 },
+    },
+  })
+  await openStablePage(page, `/instance/${PRIMARY_NODE_UUID}`)
+  const loadRange = page.locator('[data-load-chart-range]')
+  await loadRange.getByRole('tab').nth(3).click()
+  await expect.poll(() => historyHours).toContain(168)
+  await loadRange.getByRole('tab').nth(4).click()
+  await expect.poll(() => historyHours).toContain(720)
+
+  const cpuValue = page.locator('[data-load-chart-card="cpu"] [data-latest-cpu]')
+  await expect(cpuValue).toHaveText('30.0')
+  await page.waitForTimeout(350)
+  await expect(loadRange.getByRole('tab').nth(4)).toHaveAttribute('data-state', 'active')
+  await expect(cpuValue).toHaveText('30.0')
+  await expect(page.getByText('获取数据失败', { exact: true })).toHaveCount(0)
 })
 
 test('detail ping requests stay scoped to the current node', async ({ page }) => {

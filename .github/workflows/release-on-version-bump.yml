@@ -137,6 +137,6 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.release_tag }}
-          name: ${{ steps.version.outputs.release_tag }}
+          name: Glassmorphism Plus ${{ steps.version.outputs.release_tag }}
           target_commitish: ${{ github.sha }}
           generate_release_notes: true

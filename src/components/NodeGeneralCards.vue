@@ -698,19 +698,9 @@ function getCardDefinition(key: GeneralCardKey): GeneralMetricCard {
   }
 }
 
-const tiledDefaultCardKeys: GeneralCardKey[] = [
-  'onlineNodes',
-  'remainingValue',
-  'monthlyCost',
-  'totalTraffic',
-  'uploadSpeed',
-  'downloadSpeed',
-]
-const baseVisibleCards = computed(() => appStore.generalCardOrder.map(getCardDefinition))
-const tiledDefaultCards = computed(() => tiledDefaultCardKeys.map(getCardDefinition))
+const visibleCards = computed(() => appStore.generalCardOrder.map(getCardDefinition))
 const showEarth = computed(() => !appStore.hideEarth)
 const isTiledEarth = computed(() => showEarth.value && appStore.earthRenderer === 'tiled')
-const visibleCards = computed(() => isTiledEarth.value ? tiledDefaultCards.value : baseVisibleCards.value)
 const shouldRenderHeader = computed(() => showEarth.value || visibleCards.value.length > 0)
 const hasExtraCards = computed(() => visibleCards.value.length > 6)
 const wrapperClass = computed(() => {
@@ -828,6 +818,7 @@ onMounted(async () => {
       <CardX
         v-for="(card, index) in visibleCards"
         :key="card.key"
+        :data-general-card-key="card.key"
         hoverable
         :class="[cardClass, getCardPositionClass(index), card.action && 'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring']"
         content-class="h-full !p-3"

@@ -226,6 +226,7 @@ const loading = ref(false)
 const isInitialLoad = ref(true) // 是否为首次加载（用于控制实时模式下的 NSpin 显示）
 const error = ref<string | null>(null)
 let lastRealtimeMetricFetchAt = 0
+let dataRequestSequence = 0
 
 // 节点信息
 const nodeInfo = computed(() => nodesStore.nodesByUuid.get(props.uuid))
@@ -542,7 +543,7 @@ async function loadMetricCatalog(): Promise<void> {
   pingTasks.value = tasks
 }
 
-async function loadMetricHistoryRecords(params: Pick<MetricQueryParams, 'hours' | 'start' | 'end'>): Promise<MetricHistoryData | null> {
+async function loadMetricHistoryRecords(entityId: string, params: Pick<MetricQueryParams, 'hours' | 'start' | 'end'>): Promise<MetricHistoryData | null> {
   const definitions = await loadMetricDefinitions()
   const availableKeys = new Set(definitions.map(definition => definition.name))
   availableMetricKeys.value = availableKeys
@@ -552,12 +553,16 @@ async function loadMetricHistoryRecords(params: Pick<MetricQueryParams, 'hours' 
 
   const result = await queryMetrics({
     metric_keys: metricKeys,
-    entity_id: props.uuid,
+    entity_id: entityId,
     ...params,
     downsample: true,
     fill_empty: true,
     max_points: METRIC_HISTORY_MAX_POINTS,
     aggregation: 'avg',
+    aggregation_by_metric: {
+      'net.total.up': 'last',
+      'net.total.down': 'last',
+    },
   })
 
   const series = normalizeMetricSeriesList(result.series)
@@ -616,6 +621,8 @@ async function fetchRecentData() {
   if (!props.uuid)
     return
 
+  const requestSequence = ++dataRequestSequence
+  const requestedUuid = props.uuid
   metricData.value = null
   void refreshRealtimeMetricSeries()
 
@@ -626,25 +633,39 @@ async function fetchRecentData() {
   error.value = null
 
   try {
-    const result = await rpc.getNodeRecentStatus(props.uuid)
+    const result = await rpc.getNodeRecentStatus(requestedUuid)
+    if (requestSequence !== dataRequestSequence || props.uuid !== requestedUuid || !isRealtime.value)
+      return
     const records = result?.records || []
     records.sort((a, b) => dayjs(a.time).valueOf() - dayjs(b.time).valueOf())
     const maxLength = 150
     remoteData.value = records.slice(-maxLength)
   }
   catch (err) {
+    if (requestSequence !== dataRequestSequence || props.uuid !== requestedUuid || !isRealtime.value)
+      return
     error.value = err instanceof Error ? err.message : '获取数据失败'
     remoteData.value = []
   }
   finally {
-    loading.value = false
-    isInitialLoad.value = false
+    if (requestSequence === dataRequestSequence && props.uuid === requestedUuid && isRealtime.value) {
+      loading.value = false
+      isInitialLoad.value = false
+    }
   }
 }
 
 async function fetchHistoryData() {
   if (!props.uuid)
     return
+
+  const requestSequence = ++dataRequestSequence
+  const requestedUuid = props.uuid
+  const requestedView = selectedView.value
+  const isCurrentRequest = () => requestSequence === dataRequestSequence
+    && props.uuid === requestedUuid
+    && selectedView.value === requestedView
+    && !isRealtime.value
 
   if (isCustomRange.value && !customRange.value) {
     metricData.value = null
@@ -664,7 +685,9 @@ async function fetchHistoryData() {
   error.value = null
 
   try {
-    const metricHistory = await loadMetricHistoryRecords(metricParams).catch(() => null)
+    const metricHistory = await loadMetricHistoryRecords(requestedUuid, metricParams).catch(() => null)
+    if (!isCurrentRequest())
+      return
     const hasCpuHistory = metricHistory?.records.some(record => record.cpu !== null && Number.isFinite(record.cpu)) ?? false
     if (metricHistory && hasCpuHistory) {
       metricData.value = metricHistory.records
@@ -674,17 +697,23 @@ async function fetchHistoryData() {
     else {
       metricData.value = null
       rawMetricSeries.value = metricHistory?.series ?? []
-      remoteData.value = await loadNodeLoadRecords(props.uuid, hours, LOAD_RECORD_MAX_COUNT)
+      const legacyRecords = await loadNodeLoadRecords(requestedUuid, hours, LOAD_RECORD_MAX_COUNT)
+      if (!isCurrentRequest())
+        return
+      remoteData.value = legacyRecords
     }
   }
   catch (err) {
+    if (!isCurrentRequest())
+      return
     error.value = err instanceof Error ? err.message : '获取数据失败'
     remoteData.value = []
     metricData.value = null
     rawMetricSeries.value = []
   }
   finally {
-    loading.value = false
+    if (isCurrentRequest())
+      loading.value = false
   }
 }
 

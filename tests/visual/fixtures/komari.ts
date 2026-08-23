@@ -36,6 +36,15 @@ export interface VisualFixtureOptions {
   siteName?: string
   disablePageAnimation?: boolean
   pingRecordPreserveTime?: number
+  generalCardPreset?: string
+  generalCardKeys?: string[]
+  loadMetricFixture?: LoadMetricFixture
+}
+
+export interface LoadMetricFixture {
+  rejectPerMetricAggregation?: boolean
+  delayMsByHours?: Record<string, number>
+  cpuValueByHours?: Record<string, number>
 }
 
 export interface NodeCardPingFixture {
@@ -692,9 +701,23 @@ function metricValue(key: string, index: number): number {
   return values[key] ?? 0
 }
 
-function buildMetricResponse(payload: Record<string, unknown>, missingCpuMetricHistory = false) {
+function metricRequestHours(payload: Record<string, unknown>): number {
+  if (typeof payload.hours === 'number' && Number.isFinite(payload.hours))
+    return Math.round(payload.hours)
+  const start = typeof payload.start === 'string' ? Date.parse(payload.start) : Number.NaN
+  const end = typeof payload.end === 'string' ? Date.parse(payload.end) : Number.NaN
+  return Number.isFinite(start) && Number.isFinite(end) ? Math.round((end - start) / 3_600_000) : 0
+}
+
+function buildMetricResponse(
+  payload: Record<string, unknown>,
+  missingCpuMetricHistory = false,
+  loadMetricFixture?: LoadMetricFixture,
+) {
   const requested = Array.isArray(payload.metric_keys) ? payload.metric_keys.map(String) : METRIC_KEYS
   const uuid = typeof payload.entity_id === 'string' ? payload.entity_id : uuidFor(0)
+  const requestedHours = metricRequestHours(payload)
+  const fixedCpuValue = loadMetricFixture?.cpuValueByHours?.[String(requestedHours)]
   const points = Array.from({ length: 48 }, (_, index) => ({
     time: new Date(Date.parse(FIXED_NOW) - (47 - index) * 75_000).toISOString(),
     index,
@@ -704,7 +727,10 @@ function buildMetricResponse(payload: Record<string, unknown>, missingCpuMetricH
     entity_id: uuid,
     type: 'gauge',
     tags: key.startsWith('ping.') ? { task_id: '1', task_name: 'Tokyo' } : {},
-    points: points.map(point => ({ time: point.time, value: metricValue(key, point.index) })),
+    points: points.map(point => ({
+      time: point.time,
+      value: key === 'cpu.usage' && fixedCpuValue !== undefined ? fixedCpuValue : metricValue(key, point.index),
+    })),
   }))
   return { start: points[0].time, end: points.at(-1)?.time, series, count: series.length }
 }
@@ -771,6 +797,7 @@ async function handleRpc(
   nodeCardPingFixture?: NodeCardPingFixture,
   pingResponseGate?: PingResponseGate,
   missingCpuMetricHistory = false,
+  loadMetricFixture?: LoadMetricFixture,
   getNow: () => Promise<number> = async () => Date.now(),
   pingTimeline: PingRpcTimelineEntry[] = [],
 ): Promise<void> {
@@ -789,6 +816,13 @@ async function handleRpc(
     const end = typeof payload.params?.end === 'string' ? Date.parse(payload.params.end) : Number.NaN
     const hours = Number.isFinite(start) && Number.isFinite(end) ? Math.round((end - start) / 3_600_000) : 0
     const delay = nodeCardPingFixture.metricQueryDelayMsByHours[String(hours)] ?? 0
+    if (delay > 0)
+      await new Promise(resolve => setTimeout(resolve, delay))
+  }
+
+  if (payload.method === 'public:queryMetrics' && loadMetricFixture?.delayMsByHours) {
+    const hours = metricRequestHours(payload.params ?? {})
+    const delay = loadMetricFixture.delayMsByHours[String(hours)] ?? 0
     if (delay > 0)
       await new Promise(resolve => setTimeout(resolve, delay))
   }
@@ -863,8 +897,11 @@ async function handleRpc(
           result = buildNodeCardPingMetricResponse(payload.params ?? {}, nodeCardPingFixture, responseAt)
         }
       }
+      else if (loadMetricFixture?.rejectPerMetricAggregation && payload.params?.aggregation_by_metric) {
+        error = { code: -32602, message: 'Fixture per-metric aggregation unsupported' }
+      }
       else {
-        result = buildMetricResponse(payload.params ?? {}, missingCpuMetricHistory)
+        result = buildMetricResponse(payload.params ?? {}, missingCpuMetricHistory, loadMetricFixture)
       }
       break
     case 'public:getPingMetricStats':
@@ -960,6 +997,12 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     homeQuickControlsEnabled: true,
     homeQuickControlPreset: '完整',
     homeToolsEnabled: true,
+    generalCardPreset: options.generalCardPreset ?? '自定义',
+    generalCardKeys: (options.generalCardKeys ?? (
+      options.earthRenderer === 'tiled'
+        ? ['onlineNodes', 'remainingValue', 'monthlyCost', 'totalTraffic', 'uploadSpeed', 'downloadSpeed']
+        : ['memory', 'disk', 'remainingValue', 'totalTraffic', 'uploadSpeed', 'downloadSpeed']
+    )).join('\n'),
     hidePingTaskBindingEntry: options.hidePingTaskBindingEntry ?? false,
     nodeCardPingTaskBindings: options.nodeCardPingTaskBindings ?? '{}',
     fixtureUnrelatedSetting: 'preserve-me',
@@ -1054,6 +1097,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     nodeCardPingFixture,
     pingResponseGate,
     options.missingCpuMetricHistory ?? false,
+    options.loadMetricFixture,
     readBrowserNow,
     pingTimeline,
   ))
