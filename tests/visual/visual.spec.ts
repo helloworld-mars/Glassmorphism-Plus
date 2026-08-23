@@ -170,6 +170,17 @@ function readPingRangeHours(params: Record<string, unknown>): number {
   return (Date.parse(String(params.end)) - Date.parse(String(params.start))) / 3_600_000
 }
 
+function isRpc2Request(requestUrl: string): boolean {
+  return new URL(requestUrl).pathname.replace(/\/+$/, '').endsWith('/rpc2')
+}
+
+test('RPC request observers accept clean and prefixed rpc2 paths without overmatching', () => {
+  expect(isRpc2Request('http://127.0.0.1:4173/rpc2')).toBe(true)
+  expect(isRpc2Request('http://127.0.0.1:4173/api/rpc2')).toBe(true)
+  expect(isRpc2Request('http://127.0.0.1:4173/custom/rpc2/?request=1')).toBe(true)
+  expect(isRpc2Request('http://127.0.0.1:4173/rpc20')).toBe(false)
+})
+
 async function expectNodeCardPingTooltip(page: Page, metric: 'latency' | 'loss', text: string): Promise<void> {
   const tooltips = primaryNodeCard(page).locator(`[data-node-ping-bars="${metric}"] [role="tooltip"]`)
   await expect.poll(async () => (await tooltips.allTextContents()).some(content => content.includes(text))).toBe(true)
@@ -589,7 +600,7 @@ test('Ping modal and detail restore the smoothing control without changing the r
 test('Ping-only 7-day and 14-day ranges use their own Metric windows and do not alter load ranges', async ({ page }) => {
   const pingMetricCalls: Array<Record<string, unknown>> = []
   page.on('request', (request) => {
-    if (!request.url().endsWith('/api/rpc2'))
+    if (!isRpc2Request(request.url()))
       return
     const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
     if (payload?.method === 'public:queryMetrics') {
@@ -655,7 +666,7 @@ test('Ping range availability respects the public Ping retention setting', async
 test('a long custom Ping range reuses the bounded coverage loader without changing shorter presets', async ({ page }) => {
   const queryCalls: Array<Record<string, unknown>> = []
   page.on('request', (request) => {
-    if (!request.url().endsWith('/api/rpc2'))
+    if (!isRpc2Request(request.url()))
       return
     const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
     if (payload?.method === 'public:queryMetrics') {
@@ -707,7 +718,7 @@ test('30-day Ping stitches sparse daily history with the retained hourly tier in
   const queryCalls: Array<Record<string, unknown>> = []
   const legacyCalls: Array<Record<string, unknown>> = []
   page.on('request', (request) => {
-    if (!request.url().endsWith('/api/rpc2'))
+    if (!isRpc2Request(request.url()))
       return
     const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
     if (payload?.method === 'public:queryMetrics') {
@@ -1254,7 +1265,7 @@ test('detail short history falls back when metric history omits CPU', async ({ p
 test('detail historical Metric ranges keep gauges on avg and cumulative counters on last', async ({ page }) => {
   const historyQueries: Record<string, unknown>[] = []
   page.on('request', (request) => {
-    if (!request.url().endsWith('/api/rpc2'))
+    if (!isRpc2Request(request.url()))
       return
     const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
     const metricKeys = Array.isArray(payload?.params?.metric_keys) ? payload.params.metric_keys.map(String) : []
@@ -1298,7 +1309,7 @@ test('detail historical Metric ranges keep gauges on avg and cumulative counters
 test('detail cumulative counter query falls back once to Legacy when per-metric aggregation is unsupported', async ({ page }) => {
   const calls: Array<{ method: string, params: Record<string, unknown> }> = []
   page.on('request', (request) => {
-    if (!request.url().endsWith('/api/rpc2'))
+    if (!isRpc2Request(request.url()))
       return
     const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
     if (payload?.method)
@@ -1322,7 +1333,7 @@ test('detail cumulative counter query falls back once to Legacy when per-metric 
 test('detail rapid range switching ignores a delayed older Metric response', async ({ page }) => {
   const historyHours: number[] = []
   page.on('request', (request) => {
-    if (!request.url().endsWith('/api/rpc2'))
+    if (!isRpc2Request(request.url()))
       return
     const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
     const metricKeys = Array.isArray(payload?.params?.metric_keys) ? payload.params.metric_keys.map(String) : []
@@ -1363,7 +1374,7 @@ test('detail ping requests stay scoped to the current node', async ({ page }) =>
   }
 
   page.on('request', (request) => {
-    if (!request.url().endsWith('/api/rpc2'))
+    if (!isRpc2Request(request.url()))
       return
 
     const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
@@ -1457,7 +1468,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('keeps an exact selected-task snapshot visible throughout the home-to-detail leave transition', async ({ page }) => {
     const selectedTaskQueries: Array<Record<string, unknown>> = []
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
 
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
@@ -1535,7 +1546,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('12 valid bindings load one task catalog and only their selected Metric pairs', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
       if (payload?.method)
@@ -1562,7 +1573,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('12 bound nodes perform only one selected Metric pair in the next successful sample cycle', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
       if (payload?.method)
@@ -1608,7 +1619,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('accepts sanitized Komari 1.4.1 HAR Metric data when loss_approximate is omitted', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
       if (payload?.method)
@@ -1650,7 +1661,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('reuses an in-flight selected-task request after the card view remounts', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
       if (payload?.method)
@@ -1680,7 +1691,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('refreshes the task catalog and selected task data after their TTLs expire', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
       if (payload?.method)
@@ -1707,7 +1718,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('keeps the last accepted snapshot until a delayed real sample arrives and then updates without navigation', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
       if (payload?.method)
@@ -2351,7 +2362,7 @@ test.describe('node-card per-node ping task bindings', () => {
     const selectedMetricQueryCount = () => calls.filter(call => call.method === 'public:queryMetrics'
       && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202').length
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
 
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
@@ -2427,7 +2438,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('releases the selected-task scheduler when its card view unmounts', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
       if (payload?.method)
@@ -2452,7 +2463,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('visibility and online recovery trigger shared silent selected-task refreshes', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
       if (payload?.method)
@@ -2483,7 +2494,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('a selected Metric failure uses only that node legacy data and leaves other nodes on Metric', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
       if (payload?.method)
@@ -2507,7 +2518,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('selected Metric failure with a successful empty Legacy response keeps each valid binding empty without querying the aggregate', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
       if (payload?.method)
@@ -2585,7 +2596,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('uses selected Legacy history instead of a stats.latest-only synthetic Metric point', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
       if (payload?.method)
@@ -2607,7 +2618,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('keeps a valid binding empty when stats lack selected history and Legacy also lacks data', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
       if (payload?.method)
@@ -2629,7 +2640,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('empty setting retains the all-task aggregate and does not request a task catalog', async ({ page }) => {
     let publicTaskCalls = 0
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
       const payload = request.postDataJSON() as { method?: string } | null
       if (payload?.method === 'public:getPublicPingTasks')
@@ -2649,7 +2660,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('valid selected task uses only that task\'s Metric latency, loss, and trend data', async ({ page }) => {
     const selectedMetricCalls: Array<Record<string, unknown>> = []
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
       if (payload?.method === 'public:queryMetrics' || payload?.method === 'public:getPingMetricStats')
@@ -2689,7 +2700,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('a valid 100% loss Metric binding keeps summary latency empty, uses only its task, and recovers automatically', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
       if (payload?.method)
@@ -2741,7 +2752,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('selected Legacy full-loss records keep a valid binding task-scoped when Metric requests fail', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
       if (payload?.method)
@@ -2802,7 +2813,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('task with no Metric or Legacy data remains empty when its binding is valid', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
       if (payload?.method)
@@ -2894,7 +2905,7 @@ test.describe('node-card per-node ping task bindings', () => {
   test('list and detail Ping consumers remain unfiltered by node-card setting', async ({ page }) => {
     const detailPingCalls: Array<Record<string, unknown>> = []
     page.on('request', (request) => {
-      if (!request.url().endsWith('/api/rpc2'))
+      if (!isRpc2Request(request.url()))
         return
       const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
       if (payload?.method === 'public:queryMetrics') {
