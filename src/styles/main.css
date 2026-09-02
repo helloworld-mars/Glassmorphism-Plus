@@ -37,6 +37,11 @@
   --signal-3: #a3e635;
   --signal-4: #facc15;
   --signal-5: #f43f5e;
+  --ping-latency-excellent: #2fc66e;
+  --ping-latency-good: #9fe339;
+  --ping-latency-moderate: #cbd83a;
+  --ping-latency-elevated: #e2a928;
+  --ping-critical: #dc2626;
   --border: oklch(0.92 0.004 286.32);
   --input: oklch(0.92 0.004 286.32);
   --ring: oklch(0.705 0.015 286.067);
@@ -78,6 +83,11 @@
   --signal-3: #a3e635;
   --signal-4: #fde047;
   --signal-5: #fb7185;
+  --ping-latency-excellent: #2fc66e;
+  --ping-latency-good: #9fe339;
+  --ping-latency-moderate: #cbd83a;
+  --ping-latency-elevated: #e2a928;
+  --ping-critical: #f47067;
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.552 0.016 285.938);
@@ -496,7 +506,8 @@ header {
   --ping-bucket-height: 4px;
   --ping-bucket-gap: 2px;
   --ping-row-gap: 3px;
-  --ping-label-width: 24px;
+  --ping-label-width: 30px;
+  --ping-trend-row-height: 10px;
   --ping-strip-height: 52px;
   --ping-strip-padding-x: 8px;
   --ping-strip-padding-y: 6px;
@@ -513,11 +524,12 @@ header {
 .node-card-ping-task-strip[data-node-ping-size='mini'] {
   --ping-bucket-height: 3px;
   --ping-bucket-gap: 1px;
-  --ping-row-gap: 3px;
-  --ping-label-width: 22px;
+  --ping-row-gap: 2px;
+  --ping-label-width: 28px;
+  --ping-trend-row-height: 9px;
   --ping-strip-height: 40px;
   --ping-strip-padding-x: 6px;
-  --ping-strip-padding-y: 4px;
+  --ping-strip-padding-y: 2px;
 }
 
 .node-card-ping-task-strip[data-node-ping-size='comfortable'],
@@ -526,6 +538,7 @@ header {
   --ping-bucket-gap: 2px;
   --ping-row-gap: 4px;
   --ping-strip-height: 58px;
+  --ping-trend-row-height: 11px;
   --ping-strip-padding-x: 10px;
   --ping-strip-padding-y: 8px;
 }
@@ -542,15 +555,40 @@ header {
 .node-card-ping-trend-row {
   display: grid;
   min-width: 0;
-  height: var(--ping-bucket-height);
+  height: var(--ping-trend-row-height);
   grid-template-columns: var(--ping-label-width) minmax(0, 1fr);
   align-items: center;
   column-gap: 4px;
 }
 
 .node-card-ping-trend-label {
-  font-size: 8px;
+  display: inline-flex;
+  box-sizing: border-box;
+  width: fit-content;
+  min-width: 26px;
+  height: var(--ping-trend-row-height);
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, currentcolor 28%, transparent);
+  border-radius: 3px;
+  background: color-mix(in srgb, currentcolor 7%, transparent);
+  font-size: 9px;
+  font-weight: 650;
   line-height: 1;
+}
+
+.node-card-ping-task-strip[data-node-ping-size='mini'] .node-card-ping-trend-label {
+  font-size: 8px;
+}
+
+.node-card-ping-trend-row[data-node-ping-trend='latency'] .node-card-ping-trend-label,
+.node-card-ping-trend-row[data-node-ping-panel='latency'] .node-card-ping-trend-label {
+  color: color-mix(in srgb, var(--color-info) 82%, var(--color-foreground));
+}
+
+.node-card-ping-trend-row[data-node-ping-trend='loss'] .node-card-ping-trend-label,
+.node-card-ping-trend-row[data-node-ping-panel='loss'] .node-card-ping-trend-label {
+  color: color-mix(in srgb, #a855f7 70%, var(--color-foreground));
 }
 
 .node-card-ping-bucket-grid {
@@ -562,6 +600,41 @@ header {
   grid-template-columns: repeat(20, minmax(0, 1fr));
   align-items: stretch;
   column-gap: var(--ping-bucket-gap);
+}
+
+.node-card-ping-bucket-hitbox[data-node-ping-severity='neutral'] > .node-card-ping-bucket-fill {
+  background-color: color-mix(in srgb, var(--color-muted-foreground) 15%, transparent);
+}
+
+.node-card-ping-bucket-hitbox[data-node-ping-state='pending'][data-node-ping-severity='neutral']
+  > .node-card-ping-bucket-fill {
+  background-color: transparent;
+}
+
+.node-card-ping-bucket-hitbox[data-node-ping-severity='excellent'] > .node-card-ping-bucket-fill {
+  background-color: var(--ping-latency-excellent);
+}
+
+.node-card-ping-bucket-hitbox[data-node-ping-severity='good'] > .node-card-ping-bucket-fill {
+  background-color: var(--ping-latency-good);
+}
+
+.node-card-ping-bucket-hitbox[data-node-ping-severity='moderate'] > .node-card-ping-bucket-fill {
+  background-color: var(--ping-latency-moderate);
+}
+
+.node-card-ping-bucket-hitbox[data-node-ping-severity='elevated'] > .node-card-ping-bucket-fill {
+  background-color: var(--ping-latency-elevated);
+}
+
+.node-card-ping-bucket-hitbox[data-node-ping-severity='critical'] > .node-card-ping-bucket-fill,
+.node-card-ping-bucket-hitbox[data-node-ping-severity='unreachable'] > .node-card-ping-bucket-fill {
+  background-color: var(--ping-critical);
+}
+
+.node-card-ping-bucket-hitbox[data-node-ping-severity='error'] > .node-card-ping-bucket-fill {
+  background-color: transparent;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ping-critical) 62%, transparent) inset;
 }
 
 .node-card-ping-bucket-hitbox,

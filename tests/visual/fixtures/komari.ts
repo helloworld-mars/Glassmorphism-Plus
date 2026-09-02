@@ -76,6 +76,7 @@ export interface NodeCardPingFixture {
   metricQueryOmitTaskIds?: number[]
   task202Exists?: boolean
   task202Assigned?: boolean
+  task202Name?: string
   task202Latency?: number | null
   task202Loss?: number
   /** Make task 303 available to every fixture node for v2 three-task layouts. */
@@ -273,7 +274,7 @@ function buildNodeCardPingTasks(
   if (task202Exists) {
     tasks.push({
       id: 202,
-      name: 'Fixture Hong Kong',
+      name: fixture.task202Name ?? 'Fixture Hong Kong',
       interval: 60,
       loss: fixture.task202Loss ?? 25,
       weight: 2,

@@ -2,6 +2,24 @@
 
 本文件只记录 **Glassmorphism Plus** 自己的发行版本。原始 Glassmorphism 的版本历史请查看[上游仓库](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases)；Plus 的选择性同步记录见 [UPSTREAM.md](UPSTREAM.md)。
 
+## [2.3.0] - 2026-09-03
+
+### Changed
+
+- 修正 NodeCard Ping 延迟严重度误判：`158–180ms` 不再直接显示为严重红色；延迟按 `60 / 100 / 160 / 200ms` 分级，`>200ms` 才进入严重档，丢包继续独立判级。
+- 强化延迟／丢包双 20 格的固定标签栏，在 mini、compact、comfortable、large、单任务／三任务及深浅模式下保持固定 bucket 几何与更清晰的信息层级。
+- 每个 bucket 的 hover／focus Tooltip 统一展示同一任务、同一时间点的延迟与丢包；等待、暂无采样、更新失败和不可达使用互不混淆的文案。
+- 真实 `latency = null` 且同点 `loss = 100%` 的观测明确显示为不可达：延迟轨和丢包轨均使用错误红，摘要保持 `延迟 -`／`丢包 100%`；单独的 null、补点空值与失败请求不会冒充不可达。
+
+### Compatibility and performance
+
+- 本版仅调整 NodeCard Ping 展示判定、样式与回归测试；既有 task identity、Metric／Legacy 归一化、分桶、缓存、fallback、共享 scheduler、timer 与 subscriber 均未改写。
+- 新增阈值边界、正常／部分丢包／不可达／等待／确认缺失／请求失败、Tooltip 成对语义，以及四种尺寸 × 单／三任务 × 桌面／平板／移动端 × 深浅模式的固定几何回归。
+
+### Credits
+
+- 延迟分级和色彩语义参考了 Komari-Theme-LuminaPlus v1.3.1 的公开行为；实现仍为 Glassmorphism Plus 架构内的 clean-room reimplementation，详见 [CREDITS.md](CREDITS.md)。
+
 ## [2.2.0] - 2026-09-02
 
 ### Changed
@@ -122,6 +140,7 @@
 
 Git tags `1.0`、`1.1` 与 `1.2` 指向同一历史 commit。现有证据不足以为这三个 tag 分别重建独立、可靠的变更列表，因此这里只保留历史事实，不推测具体修复内容。
 
+[2.3.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v1.4.0...v2.0.0

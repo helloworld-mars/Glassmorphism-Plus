@@ -1,4 +1,5 @@
 import type { Locator } from '@playwright/test'
+import type { NodeCardPingHistoryPoint } from '../../src/types/node-card-ping'
 import type { NodeCardMultiPingConfig } from '../../src/utils/nodeCardMultiPingConfig'
 import type { NodeCardPingConfig } from '../../src/utils/nodeCardPingConfig'
 import { expect, test } from '@playwright/test'
@@ -12,6 +13,13 @@ import {
   resolveNodeCardPingRuntimeConfig,
   serializeNodeCardPingConfig,
 } from '../../src/utils/nodeCardPingConfig'
+import {
+  classifyNodeCardLatency,
+  classifyNodeCardLoss,
+  isConfirmedNodeCardPingUnreachable,
+  latencyBucketSeverity,
+  lossBucketSeverity,
+} from '../../src/utils/nodeCardPingPresentation'
 import { installKomariFixture, PRIMARY_NODE_UUID } from './fixtures/komari'
 
 const NODE_2 = '00000000-0000-4000-8000-000000000002'
@@ -74,6 +82,7 @@ async function readTaskStripGeometry(strip: Locator) {
       rowGap: loss.rect.top - latency.rect.bottom,
       cssRowGap: Number.parseFloat(getComputedStyle(element).getPropertyValue('--ping-row-gap')),
       cssThickness: Number.parseFloat(getComputedStyle(element).getPropertyValue('--ping-bucket-height')),
+      trendRowHeight: Number.parseFloat(getComputedStyle(element).getPropertyValue('--ping-trend-row-height')),
     }
   })
 }
@@ -91,7 +100,7 @@ function expectFixedRailGeometry(
   expect(geometry.loss.rect.height).toBeCloseTo(expectedThickness, 1)
   expect(geometry.latency.rect.width).toBeCloseTo(geometry.loss.rect.width, 1)
   expect(geometry.rowGap).toBeCloseTo(expectedRowGap, 1)
-  expect(geometry.cssRowGap).toBe(expectedRowGap)
+  expect(geometry.rowGap).toBeCloseTo(geometry.trendRowHeight + geometry.cssRowGap - expectedThickness, 1)
   for (const rail of [geometry.latency, geometry.loss]) {
     expect(rail.gap).toBeCloseTo(expectedBucketGap, 1)
     const widths = rail.buckets.map(bucket => bucket.wrapper.width)
@@ -111,11 +120,87 @@ function expectFixedRailGeometry(
 }
 
 const NODE_CARD_PING_GEOMETRY = [
-  { size: 'mini', thickness: 3, rowGap: 3, bucketGap: 1 },
-  { size: 'compact', thickness: 4, rowGap: 3, bucketGap: 2 },
-  { size: 'comfortable', thickness: 5, rowGap: 4, bucketGap: 2 },
-  { size: 'large', thickness: 5, rowGap: 4, bucketGap: 2 },
+  { size: 'mini', viewportWidth: 390, thickness: 3, rowGap: 8, bucketGap: 1 },
+  { size: 'compact', viewportWidth: 768, thickness: 4, rowGap: 9, bucketGap: 2 },
+  { size: 'comfortable', viewportWidth: 1024, thickness: 5, rowGap: 10, bucketGap: 2 },
+  { size: 'large', viewportWidth: 1440, thickness: 5, rowGap: 10, bucketGap: 2 },
 ] as const
+
+function historyPoint(value: Partial<NodeCardPingHistoryPoint> = {}): NodeCardPingHistoryPoint {
+  return {
+    time: '2026-09-02T16:19:00.000Z',
+    latency: null,
+    loss: null,
+    latencySampleTime: null,
+    lossSampleTime: null,
+    latencyState: 'pending',
+    lossState: 'pending',
+    ...value,
+  }
+}
+
+test.describe('node-card Ping v2.3 presentation semantics', () => {
+  test('uses the Lumina latency thresholds without treating 158-180 ms as critical', () => {
+    expect([
+      [0, 'excellent'],
+      [60, 'excellent'],
+      [61, 'good'],
+      [100, 'good'],
+      [101, 'moderate'],
+      [158, 'moderate'],
+      [160, 'moderate'],
+      [161, 'elevated'],
+      [170, 'elevated'],
+      [180, 'elevated'],
+      [200, 'elevated'],
+      [201, 'critical'],
+      [null, 'neutral'],
+    ].map(([value]) => classifyNodeCardLatency(value as number | null))).toEqual([
+      'excellent',
+      'excellent',
+      'good',
+      'good',
+      'moderate',
+      'moderate',
+      'moderate',
+      'elevated',
+      'elevated',
+      'elevated',
+      'elevated',
+      'critical',
+      'neutral',
+    ])
+  })
+
+  test('keeps loss severity independent and requires paired real evidence for unreachable', () => {
+    expect([0, 0.5, 2, 4, 25, 100, null].map(classifyNodeCardLoss)).toEqual([
+      'excellent',
+      'good',
+      'moderate',
+      'elevated',
+      'critical',
+      'critical',
+      'neutral',
+    ])
+
+    const unreachable = historyPoint({
+      latency: null,
+      loss: 100,
+      latencySampleTime: '2026-09-02T16:19:00.000Z',
+      lossSampleTime: '2026-09-02T16:19:00.000Z',
+      latencyState: 'data',
+      lossState: 'data',
+    })
+    expect(isConfirmedNodeCardPingUnreachable(unreachable)).toBe(true)
+    expect(latencyBucketSeverity(unreachable)).toBe('unreachable')
+    expect(lossBucketSeverity(unreachable)).toBe('critical')
+    expect(isConfirmedNodeCardPingUnreachable(historyPoint({ loss: 100, lossState: 'data' }))).toBe(false)
+    expect(isConfirmedNodeCardPingUnreachable(historyPoint({ latencyState: 'confirmed-missing', loss: 100, lossState: 'data' }))).toBe(false)
+    expect(isConfirmedNodeCardPingUnreachable({ ...unreachable, lossSampleTime: '2026-09-02T16:18:00.000Z' })).toBe(false)
+    expect(latencyBucketSeverity(historyPoint(), true)).toBe('error')
+    expect(lossBucketSeverity(historyPoint(), true)).toBe('error')
+  })
+})
 
 test.describe('node-card Ping v3 configuration invariants', () => {
   test('strictly parses opaque v3 data, canonicalizes node order, and serializes idempotently', () => {
@@ -381,8 +466,8 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
 
   for (const geometryCase of NODE_CARD_PING_GEOMETRY) {
     test(`${geometryCase.size} cards keep 20 fixed buckets across low and high values, hover, focus, and tooltip`, async ({ page, isMobile }) => {
-      await page.setViewportSize({ width: geometryCase.size === 'mini' ? 390 : 1440, height: 900 })
-      await installKomariFixture(page, {
+      await page.setViewportSize({ width: geometryCase.viewportWidth, height: 900 })
+      const fixture = await installKomariFixture(page, {
         hideEarth: true,
         nodeCount: 3,
         nodeCardSize: geometryCase.size,
@@ -392,6 +477,7 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
           legacy: 'valid',
           sampleCount: 20,
           thirdSharedTask: true,
+          task202Name: 'Fixture Hong Kong latency route with an intentionally long readable name',
           task202Latency: 159,
           task202Loss: 25,
         },
@@ -410,9 +496,12 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
       expectFixedRailGeometry(lowValueGeometry, geometryCase.thickness, geometryCase.rowGap, geometryCase.bucketGap)
       expectFixedRailGeometry(highValueGeometry, geometryCase.thickness, geometryCase.rowGap, geometryCase.bucketGap)
       expect(highValueGeometry.latency.buckets[0]!.wrapper.width).toBeCloseTo(lowValueGeometry.latency.buckets[0]!.wrapper.width, 1)
-      expect(await highValueStrip.locator('[data-node-ping-bars="latency"] [data-node-ping-bucket-fill]').evaluateAll(elements => elements.some(element => element.className.includes('rose')))).toBe(true)
+      const highValueDataBuckets = highValueStrip.locator('[data-node-ping-bars="latency"] > [data-node-ping-bar][data-node-ping-state="data"]')
+      await expect(highValueDataBuckets).not.toHaveCount(0)
+      expect(await highValueDataBuckets.evaluateAll(elements => elements.every(element => element.getAttribute('data-node-ping-severity') === 'moderate'))).toBe(true)
+      await expect(highValueStrip.locator('[data-node-ping-bars="latency"] > [data-node-ping-bar][data-node-ping-severity="critical"]')).toHaveCount(0)
 
-      const bucket = highValueStrip.locator('[data-node-ping-bars="latency"] > [data-node-ping-bar]').nth(5)
+      const bucket = highValueDataBuckets.first()
       const beforeInteraction = await readTaskStripGeometry(highValueStrip)
       if (!isMobile) {
         await bucket.hover()
@@ -421,8 +510,21 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
       }
       await bucket.focus()
       await expect(bucket.getByRole('tooltip')).toBeVisible()
+      await expect(bucket.getByRole('tooltip')).toContainText('延迟：159 ms')
+      await expect(bucket.getByRole('tooltip')).toContainText('丢包：25.0%')
       expectFixedRailGeometry(await readTaskStripGeometry(highValueStrip), geometryCase.thickness, geometryCase.rowGap, geometryCase.bucketGap)
       expect(await readTaskStripGeometry(highValueStrip)).toEqual(beforeInteraction)
+      await page.evaluate(() => document.documentElement.classList.add('dark'))
+      expectFixedRailGeometry(await readTaskStripGeometry(highValueStrip), geometryCase.thickness, geometryCase.rowGap, geometryCase.bucketGap)
+      await page.evaluate(() => document.documentElement.classList.remove('dark'))
+
+      fixture.setNodeCardPingDisplayConfigV3(serializeNodeCardPingConfig(v3Config({
+        global: { threeNetworkEnabled: false, taskIds: [202, null, null] },
+      })))
+      await page.reload()
+      const singleTaskStrip = page.locator(`[data-node-card-uuid="${PRIMARY_NODE_UUID}"] [data-node-ping-task-id="202"]`)
+      await expect(page.locator(`[data-node-card-uuid="${PRIMARY_NODE_UUID}"] [data-node-ping-task-id]`)).toHaveCount(1)
+      expectFixedRailGeometry(await readTaskStripGeometry(singleTaskStrip), geometryCase.thickness, geometryCase.rowGap, geometryCase.bucketGap)
       expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1)
     })
   }
@@ -444,22 +546,68 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
     const card = page.locator(`[data-node-card-uuid="${PRIMARY_NODE_UUID}"]`)
     const pendingStrip = card.locator('[data-node-ping-task-id="202"]')
     await expect(pendingStrip).toHaveAttribute('data-node-ping-status', 'pending')
-    expectFixedRailGeometry(await readTaskStripGeometry(pendingStrip), 4, 3, 2)
+    const pendingBucket = pendingStrip.locator('[data-node-ping-bars="latency"] > [data-node-ping-bar]').first()
+    await pendingBucket.focus()
+    await expect(pendingBucket.getByRole('tooltip')).toContainText('等待采样')
+    expectFixedRailGeometry(await readTaskStripGeometry(pendingStrip), 4, 9, 2)
     const invalidStrip = card.locator('[data-node-ping-invalid-slot="2"]')
     await expect(invalidStrip.locator('[data-node-ping-state="invalid"]')).toHaveCount(40)
-    expectFixedRailGeometry(await readTaskStripGeometry(invalidStrip), 4, 3, 2)
+    expectFixedRailGeometry(await readTaskStripGeometry(invalidStrip), 4, 9, 2)
 
     releasePending()
     await expect(pendingStrip).toHaveAttribute('data-node-ping-status', 'data')
     fixture.setNodeCardPingFixture({ metric: 'selected-empty', legacy: 'selected-empty' })
     await page.reload()
     await expect(pendingStrip.locator('[data-node-ping-state="confirmed-missing"]')).not.toHaveCount(0)
-    expectFixedRailGeometry(await readTaskStripGeometry(pendingStrip), 4, 3, 2)
+    const missingBucket = pendingStrip.locator('[data-node-ping-state="confirmed-missing"]').first()
+    await missingBucket.focus()
+    await expect(missingBucket.getByRole('tooltip')).toContainText('暂无采样')
+    expectFixedRailGeometry(await readTaskStripGeometry(pendingStrip), 4, 9, 2)
 
     fixture.setNodeCardPingFixture({ metric: 'error', legacy: 'error' })
     await page.reload()
     await expect(pendingStrip.locator('[data-node-ping-state="error"]')).toHaveCount(40)
-    expectFixedRailGeometry(await readTaskStripGeometry(pendingStrip), 4, 3, 2)
+    const errorBucket = pendingStrip.locator('[data-node-ping-state="error"]').first()
+    await errorBucket.focus()
+    await expect(errorBucket.getByRole('tooltip')).toContainText('更新失败')
+    expectFixedRailGeometry(await readTaskStripGeometry(pendingStrip), 4, 9, 2)
+  })
+
+  test('renders 158, 170, and 180 ms as moderate or elevated while reserving critical for over 200 ms', async ({ page }) => {
+    const latencies = [158, 170, 180, 201]
+    await installKomariFixture(page, {
+      hideEarth: true,
+      nodeCount: 3,
+      nodeCardPingDisplayConfigV3: serializeNodeCardPingConfig(v3Config({
+        global: { threeNetworkEnabled: false, taskIds: [202, null, null] },
+      })),
+      nodeCardPingFixture: {
+        metric: 'valid',
+        legacy: 'valid',
+        task202Latency: 201,
+        task202Loss: 0,
+        metricSamples: Array.from({ length: 20 }, (_, index) => ({
+          time: Date.parse('2026-07-25T11:04:30.000Z') + index * 180_000,
+          latency: latencies[index % latencies.length]!,
+          loss: 0,
+          latencyCount: 1,
+          lossCount: 1,
+          taskId: 202,
+        })),
+      },
+    })
+    await page.goto('/')
+    const strip = page.locator(`[data-node-card-uuid="${PRIMARY_NODE_UUID}"] [data-node-ping-task-id="202"]`)
+    const dataBuckets = strip.locator('[data-node-ping-bars="latency"] > [data-node-ping-bar][data-node-ping-state="data"]')
+    await expect(dataBuckets).not.toHaveCount(0)
+    await expect(dataBuckets.filter({ has: page.locator('[data-node-ping-bucket-fill]') })).not.toHaveCount(0)
+    await expect(strip.locator('[data-node-ping-bars="latency"] > [data-node-ping-bar][data-node-ping-severity="moderate"]')).not.toHaveCount(0)
+    await expect(strip.locator('[data-node-ping-bars="latency"] > [data-node-ping-bar][data-node-ping-severity="elevated"]')).not.toHaveCount(0)
+    await expect(strip.locator('[data-node-ping-bars="latency"] > [data-node-ping-bar][data-node-ping-severity="critical"]')).not.toHaveCount(0)
+    const elevatedBucket = strip.locator('[data-node-ping-bars="latency"] > [data-node-ping-bar][data-node-ping-severity="elevated"]').first()
+    await elevatedBucket.focus()
+    await expect(elevatedBucket.getByRole('tooltip')).toContainText(/延迟：(170|180) ms/u)
+    await expect(elevatedBucket.getByRole('tooltip')).toContainText('丢包：0.0%')
   })
 
   test('tooltip, focus, responsive resize, and theme styling do not trigger extra Ping RPCs', async ({ page, isMobile }) => {
@@ -578,11 +726,15 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
     await expect(latencyBars).toHaveCount(20)
     await expect(lossBars).toHaveCount(20)
     expect(await latencyBars.evaluateAll(elements => elements.every(element => element.getAttribute('data-node-ping-state') === 'unreachable'))).toBe(true)
-    expect(await latencyBars.locator('[data-node-ping-bucket-fill]').evaluateAll(elements => elements.some(element => element.className.includes('emerald')))).toBe(false)
+    expect(await latencyBars.evaluateAll(elements => elements.every(element => element.getAttribute('data-node-ping-severity') === 'unreachable'))).toBe(true)
     expect(await lossBars.evaluateAll(elements => elements.every(element => element.getAttribute('data-node-ping-state') === 'data'))).toBe(true)
-    expect(await lossBars.locator('[data-node-ping-bucket-fill]').evaluateAll(elements => elements.every(element => element.className.includes('rose')))).toBe(true)
+    expect(await lossBars.evaluateAll(elements => elements.every(element => element.getAttribute('data-node-ping-severity') === 'critical'))).toBe(true)
+    const unreachableBucket = latencyBars.first()
+    await unreachableBucket.focus()
+    await expect(unreachableBucket.getByRole('tooltip')).toContainText('延迟：不可达')
+    await expect(unreachableBucket.getByRole('tooltip')).toContainText('丢包：100%')
     const geometry = await readTaskStripGeometry(strip)
-    expectFixedRailGeometry(geometry, 4, 3, 2)
+    expectFixedRailGeometry(geometry, 4, 9, 2)
   })
 
   test('keeps mixed full, partial, and invalid triple-mode cards equal height', async ({ page }) => {

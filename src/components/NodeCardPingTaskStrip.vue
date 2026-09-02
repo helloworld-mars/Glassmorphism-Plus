@@ -4,6 +4,11 @@ import { Icon } from '@iconify/vue'
 import { computed } from 'vue'
 import { DataTooltip } from '@/components/ui/data-tooltip'
 import { formatDateTime } from '@/utils/helper'
+import {
+  isConfirmedNodeCardPingUnreachable,
+  latencyBucketSeverity,
+  lossBucketSeverity,
+} from '@/utils/nodeCardPingPresentation'
 
 const props = defineProps<{
   taskId: number
@@ -87,31 +92,8 @@ const tooltip = computed(() => {
   return lines.join('\n')
 })
 
-function latencyBarClass(point: NodeCardPingHistoryPoint): string {
-  if (point.latencyState === 'pending')
-    return 'bg-transparent'
-  if (point.latencyState === 'confirmed-missing' || point.latency === null || point.loss === 100)
-    return 'bg-muted-foreground/15'
-  if (point.latency >= 150)
-    return 'bg-rose-500/85'
-  if (point.latency >= 80)
-    return 'bg-amber-500/85'
-  return 'bg-emerald-500/75'
-}
-
-function lossBarClass(point: NodeCardPingHistoryPoint): string {
-  const state = point.lossState
-  if (state === 'pending')
-    return 'bg-transparent'
-  if (state === 'confirmed-missing' || point.loss === null)
-    return 'bg-muted-foreground/15'
-  if (point.loss >= 100)
-    return 'bg-rose-600/90'
-  return point.loss > 0 ? 'bg-amber-500/85' : 'bg-emerald-500/75'
-}
-
 function latencyBucketState(point: NodeCardPingHistoryPoint): string {
-  if (point.loss === 100)
+  if (isConfirmedNodeCardPingUnreachable(point))
     return 'unreachable'
   if (point.latency !== null)
     return 'data'
@@ -126,24 +108,24 @@ function lossBucketState(point: NodeCardPingHistoryPoint): string {
   return props.snapshot?.error && point.lossState === 'pending' ? 'error' : point.lossState
 }
 
-function barTooltip(point: NodeCardPingHistoryPoint, metric: 'latency' | 'loss'): string {
-  const state = metric === 'latency' ? point.latencyState : point.lossState
-  const sampleTime = metric === 'latency' ? point.latencySampleTime : point.lossSampleTime
-  const value = metric === 'latency' ? point.latency : point.loss
-  const effectiveState = state === 'pending' && value !== null ? 'data' : state
-  const timestamp = sampleTime || point.time ? formatDateTime(sampleTime ?? point.time, 'HH:mm:ss') : ''
+function barTooltip(point: NodeCardPingHistoryPoint): string {
+  const sampleTime = point.latencySampleTime ?? point.lossSampleTime ?? point.time
+  const timestamp = sampleTime ? formatDateTime(sampleTime, 'HH:mm:ss') : ''
   const prefix = timestamp ? `${timestamp}\n` : ''
 
-  if (effectiveState === 'pending')
-    return props.snapshot?.error ? `${prefix}加载失败，等待重试` : ''
-  if (value === null) {
-    if (effectiveState === 'data' && metric === 'latency' && point.loss === 100)
-      return `${prefix}延迟不可用（探测不可达）`
-    return `${prefix}${effectiveState === 'confirmed-missing' ? '无采样数据' : '暂无有效数据'}`
+  if (isConfirmedNodeCardPingUnreachable(point))
+    return `${prefix}延迟：不可达\n丢包：100%`
+  if (props.snapshot?.error) {
+    if (point.latency !== null || point.loss !== null)
+      return `${prefix}延迟：${point.latency === null ? '-' : `${Math.round(point.latency)} ms`}\n丢包：${point.loss === null ? '-' : `${point.loss.toFixed(1)}%`}\n状态：更新失败（显示上次数据）`
+    return `${prefix}更新失败`
   }
-  return metric === 'latency'
-    ? `${prefix}${Math.round(value)} ms`
-    : `${prefix}${value.toFixed(1)}%`
+  if (point.latency === null && point.loss === null) {
+    if (point.latencyState === 'confirmed-missing' || point.lossState === 'confirmed-missing')
+      return `${prefix}暂无采样`
+    return `${prefix}等待采样`
+  }
+  return `${prefix}延迟：${point.latency === null ? '-' : `${Math.round(point.latency)} ms`}\n丢包：${point.loss === null ? '-' : `${point.loss.toFixed(1)}%`}`
 }
 </script>
 
@@ -184,7 +166,7 @@ function barTooltip(point: NodeCardPingHistoryPoint, metric: 'latency' | 'loss')
       </DataTooltip>
     </div>
     <div class="node-card-ping-trend-row" data-node-ping-panel="latency" data-node-ping-trend="latency">
-      <span class="node-card-ping-trend-label text-muted-foreground" data-node-ping-header="latency">延迟</span>
+      <span class="node-card-ping-trend-label" data-node-ping-header="latency">延迟</span>
       <span class="node-card-ping-bucket-grid" data-node-ping-bars="latency">
         <DataTooltip
           v-for="(point, index) in history"
@@ -193,19 +175,20 @@ function barTooltip(point: NodeCardPingHistoryPoint, metric: 'latency' | 'loss')
           data-node-ping-bar
           :data-node-ping-bucket-time="point.time || undefined"
           :data-node-ping-state="latencyBucketState(point)"
+          :data-node-ping-severity="latencyBucketSeverity(point, Boolean(snapshot?.error))"
           placement="top"
-          :content="barTooltip(point, 'latency')"
+          :content="barTooltip(point)"
           content-class="whitespace-pre-line"
           class="node-card-ping-bucket-hitbox"
           tabindex="-1"
-          :aria-label="barTooltip(point, 'latency') || undefined"
+          :aria-label="barTooltip(point)"
         >
-          <span class="node-card-ping-bucket-fill" :class="latencyBarClass(point)" data-node-ping-bucket-fill />
+          <span class="node-card-ping-bucket-fill" data-node-ping-bucket-fill />
         </DataTooltip>
       </span>
     </div>
     <div class="node-card-ping-trend-row" data-node-ping-panel="loss" data-node-ping-trend="loss">
-      <span class="node-card-ping-trend-label text-muted-foreground" data-node-ping-header="loss">丢包</span>
+      <span class="node-card-ping-trend-label" data-node-ping-header="loss">丢包</span>
       <span class="node-card-ping-bucket-grid" data-node-ping-bars="loss">
         <DataTooltip
           v-for="(point, index) in history"
@@ -214,14 +197,15 @@ function barTooltip(point: NodeCardPingHistoryPoint, metric: 'latency' | 'loss')
           data-node-ping-bar
           :data-node-ping-bucket-time="point.time || undefined"
           :data-node-ping-state="lossBucketState(point)"
+          :data-node-ping-severity="lossBucketSeverity(point, Boolean(snapshot?.error))"
           placement="top"
-          :content="barTooltip(point, 'loss')"
+          :content="barTooltip(point)"
           content-class="whitespace-pre-line"
           class="node-card-ping-bucket-hitbox"
           tabindex="-1"
-          :aria-label="barTooltip(point, 'loss') || undefined"
+          :aria-label="barTooltip(point)"
         >
-          <span class="node-card-ping-bucket-fill" :class="lossBarClass(point)" data-node-ping-bucket-fill />
+          <span class="node-card-ping-bucket-fill" data-node-ping-bucket-fill />
         </DataTooltip>
       </span>
     </div>
