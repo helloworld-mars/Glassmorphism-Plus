@@ -1,6 +1,6 @@
 import type { Plugin } from 'vite'
 import { execSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, unlinkSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { relative, resolve } from 'node:path'
 import process from 'node:process'
@@ -62,11 +62,17 @@ function komariThemeZip(): Plugin {
     name: 'komari-theme-zip',
     apply: 'build',
     closeBundle: async () => {
+      if (process.env.KOMARI_SKIP_PACKAGE === '1') {
+        console.log('[komari-theme-zip] Test build requested; installer packaging skipped')
+        return
+      }
+
       const distDir = resolve(__dirname, 'dist')
       const previewPath = resolve(__dirname, 'docs/preview.png')
       const themeManifest = readThemeManifest()
       const releasePaths = ensureReleaseWorkspace(__dirname, getThemeVersion())
       const { installerPath: outputPath } = releasePaths
+      const partialOutputPath = `${outputPath}.partial-${process.pid}`
       const manifestPreviewName = typeof themeManifest.preview === 'string' && themeManifest.preview.trim()
         ? themeManifest.preview.trim()
         : 'preview.png'
@@ -76,21 +82,66 @@ function komariThemeZip(): Plugin {
         return
       }
 
-      const output = fs.createWriteStream(outputPath)
+      if (existsSync(partialOutputPath)) {
+        throw new Error(`Refusing to reuse an existing partial installer: ${partialOutputPath}`)
+      }
+
+      const output = fs.createWriteStream(partialOutputPath, { flags: 'wx' })
       const archive = archiver('zip', { zlib: { level: 9 } })
 
       return new Promise((resolve, reject) => {
+        let settled = false
+
+        const removePartialInstaller = () => {
+          if (existsSync(partialOutputPath)) {
+            unlinkSync(partialOutputPath)
+          }
+        }
+
+        const fail = (error: Error) => {
+          if (settled)
+            return
+
+          settled = true
+          output.destroy()
+
+          try {
+            removePartialInstaller()
+          }
+          catch (cleanupError) {
+            console.error('[komari-theme-zip] Partial installer cleanup failed:', cleanupError)
+          }
+
+          console.error('[komari-theme-zip] Error:', error)
+          reject(error)
+        }
+
+        output.on('error', fail)
         output.on('close', () => {
-          const sizeMB = (archive.pointer() / 1024 / 1024).toFixed(2)
-          console.log(`[komari-theme-zip] Created ${relative(__dirname, outputPath)} (${sizeMB} MB)`)
-          console.log(`[komari-theme-zip] Reserved snapshot paths: ${relative(__dirname, releasePaths.publishDirectory)}, ${relative(__dirname, releasePaths.releaseDirectory)}`)
-          resolve(undefined)
+          if (settled) {
+            try {
+              removePartialInstaller()
+            }
+            catch (cleanupError) {
+              console.error('[komari-theme-zip] Partial installer cleanup failed:', cleanupError)
+            }
+            return
+          }
+
+          try {
+            renameSync(partialOutputPath, outputPath)
+            settled = true
+            const sizeMB = (archive.pointer() / 1024 / 1024).toFixed(2)
+            console.log(`[komari-theme-zip] Created ${relative(__dirname, outputPath)} (${sizeMB} MB)`)
+            console.log(`[komari-theme-zip] Reserved snapshot paths: ${relative(__dirname, releasePaths.publishDirectory)}, ${relative(__dirname, releasePaths.releaseDirectory)}`)
+            resolve(undefined)
+          }
+          catch (error) {
+            fail(error instanceof Error ? error : new Error(String(error)))
+          }
         })
 
-        archive.on('error', (err: Error) => {
-          console.error('[komari-theme-zip] Error:', err)
-          reject(err)
-        })
+        archive.on('error', fail)
 
         archive.pipe(output)
 
@@ -105,7 +156,9 @@ function komariThemeZip(): Plugin {
 
         archive.directory(distDir, 'dist')
 
-        archive.finalize()
+        void archive.finalize().catch((error: unknown) => {
+          fail(error instanceof Error ? error : new Error(String(error)))
+        })
       })
     },
   }

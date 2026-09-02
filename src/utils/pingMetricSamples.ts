@@ -7,6 +7,8 @@ import {
 } from '@/utils/metricSeries'
 import { parsePingTimestampMs } from '@/utils/pingTime'
 
+const POSITIVE_TASK_ID_PATTERN = /^\d+$/u
+
 interface PairedMetricPoint {
   value: number | null
   count: number
@@ -52,6 +54,20 @@ function finiteValue(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+function normalizeEntityId(value: unknown): string | null {
+  if (typeof value !== 'string')
+    return null
+  const normalized = value.trim().toLowerCase()
+  return normalized || null
+}
+
+function normalizeTaskId(value: unknown): string | null {
+  if (typeof value !== 'string' || !POSITIVE_TASK_ID_PATTERN.test(value.trim()))
+    return null
+  const numeric = Number(value)
+  return Number.isSafeInteger(numeric) && numeric > 0 ? String(numeric) : null
+}
+
 function isInRequestedWindow(timestamp: number, options: PingMetricSampleOptions): boolean {
   if (typeof options.start === 'number' && timestamp < options.start)
     return false
@@ -75,15 +91,18 @@ export function normalizePingMetricSamples(
   options: PingMetricSampleOptions = {},
 ): PingMetricSample[] {
   const samplesByKey = new Map<string, PairedMetricSampleAccumulator>()
+  const requestedEntityId = options.entityId ? normalizeEntityId(options.entityId) : null
+  const requestedTaskId = options.taskId ? normalizeTaskId(options.taskId) : null
 
   for (const series of normalizeMetricSeriesList(seriesList ? [...seriesList] : [])) {
     if (series.metric_key !== PING_LATENCY_METRIC && series.metric_key !== PING_LOSS_METRIC)
       continue
-    if (options.entityId && series.entity_id !== options.entityId)
+    const entityId = normalizeEntityId(series.entity_id)
+    if (!entityId || (requestedEntityId && entityId !== requestedEntityId))
       continue
 
-    const taskId = pingTaskId(series)
-    if (!taskId || (options.taskId && taskId !== options.taskId))
+    const taskId = normalizeTaskId(pingTaskId(series))
+    if (!taskId || (requestedTaskId && taskId !== requestedTaskId))
       continue
 
     for (const point of series.points) {
@@ -91,9 +110,9 @@ export function normalizePingMetricSamples(
       if (timestamp === null || !isInRequestedWindow(timestamp, options))
         continue
 
-      const key = JSON.stringify([series.entity_id, taskId, timestamp])
+      const key = JSON.stringify([entityId, taskId, timestamp])
       const sample = samplesByKey.get(key) ?? {
-        entityId: series.entity_id,
+        entityId,
         taskId,
         timestamp,
       }

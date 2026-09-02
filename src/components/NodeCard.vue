@@ -3,6 +3,7 @@ import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
 import { useElementSize } from '@vueuse/core'
 import { computed, ref } from 'vue'
+import NodeCardPingGroup from '@/components/NodeCardPingGroup.vue'
 import { Badge } from '@/components/ui/badge'
 import { CardX } from '@/components/ui/card-x'
 import { DataTooltip } from '@/components/ui/data-tooltip'
@@ -30,16 +31,19 @@ const emit = defineEmits<{
 }>()
 const appStore = useAppStore()
 const isFavorite = computed(() => appStore.isFavoriteNode(props.node.uuid))
+const usesLegacyPingDisplay = computed(() => {
+  const runtime = appStore.nodeCardMultiPingRuntimeConfig
+  if (runtime.source !== 'v2')
+    return true
+  const nodeConfig = runtime.config.nodes[props.node.uuid.trim().toLowerCase()]
+  return nodeConfig?.mode !== 'custom' && runtime.config.global.taskIds.length === 0
+})
+const legacySelectedTaskId = computed(() => appStore.nodeCardMultiPingRuntimeConfig.source === 'v2'
+  ? undefined
+  : getNodeCardPingTaskId(appStore.nodeCardPingTaskBindings, props.node.uuid))
 
 function toggleFavorite(): void {
   appStore.toggleFavoriteNode(props.node.uuid)
-}
-
-function handleKeyboardOpen(event: KeyboardEvent) {
-  if (event.key !== 'Enter' && event.key !== ' ')
-    return
-  event.preventDefault()
-  emit('click')
 }
 
 interface RemainingInfoTag {
@@ -106,9 +110,9 @@ const {
   latencyPanelTooltip,
   lossPanelTooltip,
 } = useNodePingDisplay(() => props.node.uuid, {
-  enabled: () => props.pingEnabled,
+  enabled: () => props.pingEnabled && usesLegacyPingDisplay.value,
   retainSnapshotWhenDisabled: true,
-  selectedTaskId: () => getNodeCardPingTaskId(appStore.nodeCardPingTaskBindings, props.node.uuid),
+  selectedTaskId: legacySelectedTaskId,
 })
 
 function getPingBarGridStyle(width: number, barCount: number): Record<string, string> {
@@ -261,11 +265,8 @@ function hasRegion(region: string | null | undefined): boolean {
     :content-class="nodeCardContentPaddingClass"
     class="node-card w-full cursor-pointer border-none shadow-[0_0_0_3px] shadow-transparent transition-all duration-200 rounded-xl"
     :class="[!props.node.online && '!shadow-destructive/30']"
-    role="button"
-    tabindex="0"
-    :aria-label="`查看节点 ${props.node.name} 详情`"
+    :data-node-card-uuid="props.node.uuid"
     @click="emit('click')"
-    @keydown="handleKeyboardOpen"
   >
     <!-- 头部：在线点 + 名称 -->
     <template #header>
@@ -281,7 +282,15 @@ function hasRegion(region: string | null | undefined): boolean {
             :class="props.node.online ? 'bg-success' : 'bg-destructive'"
           />
         </div>
-        <span class="text-sm font-bold flex-1 min-w-0 truncate">{{ props.node.name }}</span>
+        <button
+          type="button"
+          class="min-w-0 flex-1 truncate rounded-sm text-left text-sm font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-selection"
+          :aria-label="`查看节点 ${props.node.name} 详情`"
+          @click.stop="emit('click')"
+          @keydown.stop
+        >
+          {{ props.node.name }}
+        </button>
         <DataTooltip
           v-if="nodeMessage"
           :content="nodeMessageTooltip"
@@ -509,8 +518,8 @@ function hasRegion(region: string | null | undefined): boolean {
           </div>
         </div>
 
-        <!-- 延迟 + 丢包 -->
-        <div class="grid grid-cols-2 gap-1.5">
+        <!-- 延迟 + 丢包：v1/aggregate 保留旧双面板；v2 使用真实 task strips。 -->
+        <div v-if="usesLegacyPingDisplay" class="grid grid-cols-2 gap-1.5" data-node-ping-mode="legacy">
           <button
             v-for="panel in nodeCardPingPanels"
             :key="panel.metric"
@@ -547,6 +556,16 @@ function hasRegion(region: string | null | undefined): boolean {
             </div>
           </button>
         </div>
+        <NodeCardPingGroup
+          v-else
+          :node-uuid="props.node.uuid"
+          :node-name="props.node.name"
+          :size="appStore.nodeCardSize"
+          :online="props.node.online"
+          :enabled="props.pingEnabled"
+          data-node-ping-mode="multi"
+          @click="emit('pingClick')"
+        />
 
         <!-- 自定义标签 -->
         <div v-if="customTags.length > 0" class="flex flex-wrap gap-1">

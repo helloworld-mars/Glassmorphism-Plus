@@ -7,6 +7,7 @@ import { getQueryMetricsRequestKey } from '../../src/services/metrics.service'
 import { loadPingMetricCoverage } from '../../src/services/pingMetricCoverage.service'
 import { RequestManager } from '../../src/services/request.service'
 import { comparePingTaskOrder, createPingTaskOrderMap, orderPingTasksByBackend } from '../../src/utils/metricSeries'
+import { inspectNodeCardMultiPingConfig } from '../../src/utils/nodeCardMultiPingConfig'
 import { smoothPingChartDisplayRows } from '../../src/utils/pingChartSmoothing'
 import { mergePingMetricCoverageResponses } from '../../src/utils/pingMetricCoverage'
 import { normalizePingMetricSamples } from '../../src/utils/pingMetricSamples'
@@ -34,18 +35,21 @@ test('Plus documentation keeps its own version identity and preserves upstream a
 
   expect(readme).toContain('# 🌌 Komari Glassmorphism Plus')
   expect(readme).toContain('当前 Plus 版本')
-  expect(readme).toContain('**v1.4.0**')
+  expect(readme).toContain('**v2.0.0**')
   expect(readme).toContain('sanrokamlan Glassmorphism v3.3.7')
-  expect(readme).toContain('v1.4.0 GitHub Release 的 installer asset 数量为 0')
+  expect(readme).toContain('v2.0.0 GitHub Release 的 installer asset 数量为 0')
   expect(readme).toContain('Source code (zip)')
   expect(readme).not.toMatch(/^#{2,}\s+(?:\S.*)?v3\.\d/m)
 
   const changelogVersions = Array.from(changelog.matchAll(/^## \[([^\]]+)\]/gm), match => match[1])
-  expect(changelogVersions).toEqual(['1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
+  expect(changelogVersions).toEqual(['2.0.0', '1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
   expect(upstream).toContain('Current upstream baseline')
   expect(upstream).toContain('v3.3.7')
   expect(credits).toContain('helloworld-mars')
   expect(credits).toContain('sanrokamlan')
+  expect(credits).toContain('Komari-Theme-LuminaPlus')
+  expect(credits).toContain('clean-room reimplementation')
+  expect(credits).toContain('not the upstream')
   expect(credits).toContain('Tony Liu')
   expect(createHash('sha256').update(license).digest('hex').toUpperCase()).toBe('4703F29BF392157FC005B92C18AE015C270BEEC13EF33A4A603D28A1B4E166D8')
 
@@ -137,7 +141,7 @@ async function expectNodeMetricIcons(page: Page): Promise<void> {
 }
 
 async function expectNodePingBars(page: Page): Promise<void> {
-  const card = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' })
+  const card = primaryNodeCard(page)
   for (const metric of ['latency', 'loss']) {
     const bars = card.locator(`[data-node-ping-bars="${metric}"]`)
     await expect(bars).toBeVisible()
@@ -146,7 +150,7 @@ async function expectNodePingBars(page: Page): Promise<void> {
 }
 
 function primaryNodeCard(page: Page) {
-  return page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' })
+  return page.locator(`[data-node-card-uuid="${PRIMARY_NODE_UUID}"]`)
 }
 
 function nodeCardPingPanel(page: Page, metric: 'latency' | 'loss') {
@@ -913,13 +917,13 @@ test('brand metadata and homepage footer retain current and original attribution
     name: 'Komari Glassmorphism Plus',
     short: 'glassmorphism-plus',
     description: 'A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.',
-    version: '1.4.0',
+    version: '2.0.0',
     author: 'helloworld-mars',
     url: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(packageMetadata).toMatchObject({
     name: 'komari-theme-glassmorphism-plus',
-    version: '1.4.0',
+    version: '2.0.0',
     homepage: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(themeManifest.short).toMatch(/^[\w-]+$/)
@@ -934,14 +938,21 @@ test('brand metadata and homepage footer retain current and original attribution
   const bindingSectionIndex = managedItems.findIndex(item => item.type === 'title' && item.name === '09 · 延迟任务绑定')
   const entrySettingIndex = managedItems.findIndex(item => item.key === 'hidePingTaskBindingEntry')
   const bindingsSettingIndex = managedItems.findIndex(item => item.key === 'nodeCardPingTaskBindings')
+  const v2BindingsSettingIndex = managedItems.findIndex(item => item.key === 'nodeCardPingDisplayConfigV2')
   expect(bindingSectionIndex).toBeGreaterThanOrEqual(0)
   expect(entrySettingIndex).toBe(bindingSectionIndex + 1)
   expect(bindingsSettingIndex).toBe(entrySettingIndex + 1)
+  expect(v2BindingsSettingIndex).toBe(bindingsSettingIndex + 1)
   expect(managedItems[entrySettingIndex]).toMatchObject({
     name: '隐藏延迟任务绑定入口',
     type: 'switch',
     default: false,
   })
+  expect(managedItems[v2BindingsSettingIndex]).toMatchObject({
+    name: '首页多 Ping 安全配置',
+    type: 'richtext',
+  })
+  expect(String(managedItems[v2BindingsSettingIndex].default)).toMatch(/^v2:/)
 
   await page.setViewportSize({ width: 1280, height: 720 })
   await installKomariFixture(page, { hideEarth: true })
@@ -949,7 +960,7 @@ test('brand metadata and homepage footer retain current and original attribution
 
   const footer = page.locator('footer')
   await expect(footer.getByRole('link', { name: 'Glassmorphism Plus' })).toHaveAttribute('href', 'https://github.com/helloworld-mars/Glassmorphism-Plus')
-  await expect(footer.getByText('v1.4.0 · helloworld-mars', { exact: true }).first()).toBeVisible()
+  await expect(footer.getByText('v2.0.0 · helloworld-mars', { exact: true }).first()).toBeVisible()
   await expect(footer.getByRole('link', { name: 'Based on the original theme by sanrokamlan' }))
     .toHaveAttribute('href', 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism')
   await expect(footer).not.toContainText('unknown')
@@ -992,13 +1003,13 @@ for (const scenario of [
     })
     await openStablePage(page)
 
-    const entry = page.getByRole('button', { name: '延迟任务绑定', exact: true })
+    const entry = page.getByTestId('ping-center-entry')
     await expect(entry).toHaveCount(scenario.visible ? 1 : 0)
     if (scenario.visible) {
-      await expect(entry).toHaveAttribute('title', '延迟任务绑定')
+      await expect(entry).toHaveAttribute('title', 'Ping 监控中心')
       await entry.hover()
       const tooltip = page.locator('[data-slot="tooltip-content"]')
-      await expect(tooltip).toContainText('延迟任务绑定')
+      await expect(tooltip).toContainText('Ping 监控中心')
       await expect(tooltip).not.toContainText('09')
     }
     await expect(page.getByRole('button', { name: /主题/ })).toBeVisible()
@@ -1126,7 +1137,7 @@ test('home mini card metric icons remain accessible', async ({ page }) => {
   await installKomariFixture(page, { nodeCardSize: 'mini', hideEarth: true })
   await openStablePage(page)
 
-  const card = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' })
+  const card = primaryNodeCard(page)
   await expect(card.locator('[data-node-metric-icon="cpu"]')).toBeVisible()
   await expect(card.locator('[data-node-metric-icon="memory"]')).toBeVisible()
   await expect(card.locator('[data-node-metric-icon="traffic"]')).toBeVisible()
@@ -1140,7 +1151,7 @@ test('node card expiry uses red through 5 days and yellow through 10 days', asyn
   await openStablePage(page)
 
   const criticalCard = primaryNodeCard(page)
-  const warningCard = page.getByRole('button', { name: '查看节点 香港边缘节点-超长名称布局测试 详情' })
+  const warningCard = page.locator('.node-card').filter({ has: page.getByText('香港边缘节点-超长名称布局测试', { exact: true }) })
   const criticalExpiry = criticalCard.getByText('剩余', { exact: true }).locator('..')
   const warningExpiry = warningCard.getByText('剩余', { exact: true }).locator('..')
 
@@ -1167,7 +1178,7 @@ test('free node pricing stays semantic across home, finance, and detail', async 
   await installKomariFixture(page, { freePriceNode: true, hideEarth: true })
   await openStablePage(page)
 
-  const nodeCard = page.getByRole('button', { name: `查看节点 ${freeNodeName} 详情` })
+  const nodeCard = primaryNodeCard(page)
   await expect(nodeCard.getByText('免费', { exact: true })).toBeVisible()
   await expect(nodeCard.getByText('无', { exact: true })).toBeVisible()
   await expect(nodeCard.getByText('免费 / 年', { exact: true })).toHaveCount(0)
@@ -1519,7 +1530,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectUniformNodeCardPingBars(primaryCard)
     await expectMatchingNodeCardPingPanelVerticalGeometry(primaryCard)
 
-    const offlineCard = page.getByRole('button', { name: '查看节点 伦敦-离线归档 详情' })
+    const offlineCard = page.locator('.node-card').filter({ has: page.getByText('伦敦-离线归档', { exact: true }) })
     await expectUniformNodeCardPingBars(offlineCard)
     await expectMatchingNodeCardPingPanelVerticalGeometry(offlineCard)
 
@@ -1869,6 +1880,7 @@ test.describe('node-card per-node ping task bindings', () => {
     const fixture = await installKomariFixture(page, {
       fakeTimers: true,
       clockNow: PING_INGESTION_CLOCK,
+      nodeCount: 1,
       nodeCardPingTaskBindings: primaryBinding(202),
       nodeCardPingFixture: {
         metric: 'error',
@@ -1883,9 +1895,11 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectNodeCardPingTooltip(page, 'latency', '加载失败')
     await expectNodeCardPingTooltip(page, 'loss', '加载失败')
 
-    await fixture.advanceTime(120_000)
+    const requestCountBeforeRetries = fixture.timeline.length
+    await fixture.advanceTime(45_000)
     for (const metric of ['latency', 'loss'] as const)
       await expectAllNodeCardPingBucketStates(page, metric, 'pending')
+    expect(fixture.timeline.length).toBeGreaterThan(requestCountBeforeRetries)
     expect(fixture.timeline.some(entry => entry.method === 'public:queryMetrics')).toBe(true)
     expect(fixture.timeline.some(entry => entry.method === 'common:getRecords' || entry.method === 'public:getPingRecords')).toBe(true)
     expect(fixture.timeline.every(entry => entry.responseSamples.length === 0)).toBe(true)
@@ -2297,7 +2311,7 @@ test.describe('node-card per-node ping task bindings', () => {
     }
   })
 
-  test('v1.3.3 bounds pending retries and releases the scheduler after NodeCard unmounts', async ({ page }) => {
+  test('v2 bounds pending retries, transfers one subscription to list view, and releases it on detail navigation', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 })
     const fixture = await installKomariFixture(page, {
       fakeTimers: true,
@@ -2319,7 +2333,17 @@ test.describe('node-card per-node ping task bindings', () => {
 
     await page.getByLabel('列表视图').click()
     fixture.timeline.length = 0
-    await fixture.advanceTime(180_000)
+    await page.evaluate(() => window.dispatchEvent(new Event('online')))
+    await expect.poll(() => selectedPingMetricTimelineEntries(fixture.timeline).length).toBeGreaterThan(0)
+    const listRefreshes = selectedPingMetricTimelineEntries(fixture.timeline)
+    expect(listRefreshes.length).toBeLessThanOrEqual(2)
+    expect(new Set(listRefreshes.map(entry => entry.params.entity_id))).toEqual(new Set([PRIMARY_NODE_UUID]))
+
+    await page.goto(`/instance/${PRIMARY_NODE_UUID}`)
+    await expect(page.getByText('硬件信息')).toBeVisible()
+    fixture.timeline.length = 0
+    await page.evaluate(() => window.dispatchEvent(new Event('online')))
+    await fixture.advanceTime(10_000)
     expect(selectedPingMetricTimelineEntries(fixture.timeline)).toHaveLength(0)
   })
 
@@ -2435,7 +2459,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectNodeCardPing(page, '200 ms', '25.0%')
   })
 
-  test('releases the selected-task scheduler when its card view unmounts', async ({ page }) => {
+  test('keeps one selected-task list subscriber and releases it when all card consumers unmount', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
       if (!isRpc2Request(request.url()))
@@ -2455,9 +2479,16 @@ test.describe('node-card per-node ping task bindings', () => {
     await page.getByLabel('列表视图').click()
     calls.length = 0
     await page.evaluate(() => window.dispatchEvent(new Event('online')))
+    const selectedQueryCount = () => calls.filter(call => call.method === 'public:queryMetrics'
+      && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202').length
+    await expect.poll(selectedQueryCount).toBe(1)
+
+    await page.goto(`/instance/${PRIMARY_NODE_UUID}`)
+    await expect(page.getByText('硬件信息')).toBeVisible()
+    calls.length = 0
+    await page.evaluate(() => window.dispatchEvent(new Event('online')))
     await page.waitForTimeout(300)
-    expect(calls.filter(call => call.method === 'public:queryMetrics'
-      && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202')).toHaveLength(0)
+    expect(selectedQueryCount()).toBe(0)
   })
 
   test('visibility and online recovery trigger shared silent selected-task refreshes', async ({ page }) => {
@@ -2902,7 +2933,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectNodeCardPing(page, '200 ms', '25.0%')
   })
 
-  test('list and detail Ping consumers remain unfiltered by node-card setting', async ({ page }) => {
+  test('list uses the first effective task while detail Ping remains an unfiltered aggregate', async ({ page }) => {
     const detailPingCalls: Array<Record<string, unknown>> = []
     page.on('request', (request) => {
       if (!isRpc2Request(request.url()))
@@ -2923,8 +2954,8 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page)
     const listPingCell = page.getByRole('button', { name: '打开延迟和丢包监测' }).first()
-    await expect(listPingCell.locator('span[aria-label$=" ms"]').first()).toHaveAttribute('aria-label', /105 ms$/)
-    await expect(listPingCell.locator('span[aria-label$="%"]').first()).toHaveAttribute('aria-label', /12\.5%$/)
+    await expect(listPingCell.locator('span[aria-label$=" ms"]').first()).toHaveAttribute('aria-label', /200 ms$/)
+    await expect(listPingCell.locator('span[aria-label$="%"]').first()).toHaveAttribute('aria-label', /25\.0%$/)
 
     detailPingCalls.length = 0
     await page.goto('/instance/00000000-0000-4000-8000-000000000001')
@@ -2940,7 +2971,7 @@ test.describe('node-card per-node ping task bindings', () => {
     })).toBe(true)
   })
 
-  test('the management page is node-centred, filters candidates by task clients, and saves UUID-to-ID mappings', async ({ page }) => {
+  test('the Ping Center is node-centred, filters candidates by task clients, and saves a v2 custom override without rewriting v1', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     const fixture = await installKomariFixture(page, {
       adminAccess: 'admin',
@@ -2949,31 +2980,37 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page, '/?view=pingsettings')
 
-    await expect(page.getByRole('heading', { name: '延迟任务绑定', exact: true })).toHaveClass(/text-2xl/)
-    await expect(page.getByTestId('node-ping-binding-manager')).not.toContainText('09 · 延迟任务绑定')
-    await expect(page.getByTestId('node-ping-binding-manager').getByText('09', { exact: true })).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: 'Ping 监控中心', exact: true })).toHaveClass(/text-2xl/)
+    await expect(page.getByTestId('ping-center')).not.toContainText('09 · 延迟任务绑定')
 
     const primaryRow = page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)
     await expect(primaryRow).toBeVisible()
-    await expect(primaryRow).toContainText('2 个候选')
-    await primaryRow.getByRole('button', { name: '选择任务' }).click()
+    await expect(primaryRow).toContainText('候选 2')
+    await primaryRow.getByRole('button', { name: '单节点配置' }).click()
 
     const dialog = page.getByRole('dialog')
-    await expect(dialog).toContainText('Fixture Tokyo')
-    await expect(dialog).toContainText('Fixture Hong Kong')
-    await expect(dialog).not.toContainText('Fixture Seoul (not assigned to primary)')
-    await dialog.locator('input[type="radio"][value="202"]').check()
-    await dialog.getByRole('button', { name: '保存' }).click()
+    await dialog.getByTestId('ping-center-node-mode-custom').click()
+    await expect(dialog.getByTestId('ping-center-node-slot-1').locator('option')).toContainText(['请选择任务', 'Fixture Tokyo', 'Fixture Hong Kong'])
+    await expect(dialog.getByTestId('ping-center-node-slot-1').locator('option')).not.toContainText(['Fixture Seoul (not assigned to primary)'])
+    await dialog.getByTestId('ping-center-node-slot-1').selectOption('202')
+    await dialog.getByRole('button', { name: '完成' }).click()
+    await page.getByTestId('ping-center-save-preview').click()
+    await page.getByTestId('ping-center-save-confirm').click()
 
     await expect(primaryRow).toContainText('Fixture Hong Kong')
-    expect(fixture.getThemeSaveCount()).toBe(1)
+    await expect.poll(() => fixture.getThemeSaveCount()).toBe(1)
     const savedSettings = fixture.getSavedThemeSettings()
     expect(savedSettings.fixtureUnrelatedSetting).toBe('preserve-me')
     expect(savedSettings.hidePingTaskBindingEntry).toBe(true)
-    expect(JSON.parse(String(savedSettings.nodeCardPingTaskBindings))).toEqual({ [PRIMARY_NODE_UUID]: 202 })
+    expect(String(savedSettings.nodeCardPingTaskBindings)).toBe('{}')
+    expect(inspectNodeCardMultiPingConfig(savedSettings.nodeCardPingDisplayConfigV2).config?.nodes[PRIMARY_NODE_UUID]).toEqual({
+      mode: 'custom',
+      displayCount: 1,
+      taskIds: [202],
+    })
   })
 
-  test('the management page searches nodes, filters unbound rows, and clears a binding', async ({ page }) => {
+  test('the Ping Center searches and filters nodes, then clears a migrated override while preserving the v1 key', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     const fixture = await installKomariFixture(page, {
       adminAccess: 'admin',
@@ -2981,23 +3018,28 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page, '/?view=pingsettings')
 
-    const search = page.getByRole('textbox', { name: '搜索节点延迟任务绑定' })
+    const search = page.getByTestId('ping-center-settings-search')
     await search.fill(PRIMARY_NODE_UUID)
     await expect(page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)).toBeVisible()
     await search.fill('no-such-node')
     await expect(page.getByText('没有匹配的节点。')).toBeVisible()
     await search.fill(PRIMARY_NODE_UUID)
-    await page.getByRole('checkbox', { name: '仅显示未绑定节点' }).check()
-    await expect(page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)).toHaveCount(0)
-    await page.getByRole('checkbox', { name: '仅显示未绑定节点' }).uncheck()
+    await page.getByTestId('ping-center-settings-filter').selectOption('custom')
+    await expect(page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)).toBeVisible()
+    await page.getByTestId('ping-center-settings-filter').selectOption('all')
 
     const primaryRow = page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)
-    await primaryRow.getByRole('button', { name: '清除绑定' }).click()
-    await expect(primaryRow).toContainText('未绑定')
-    expect(JSON.parse(String(fixture.getSavedThemeSettings().nodeCardPingTaskBindings))).toEqual({})
+    await primaryRow.getByRole('button', { name: '单节点配置' }).click()
+    await page.getByTestId('ping-center-node-clear').click()
+    await page.getByRole('dialog').getByRole('button', { name: '完成' }).click()
+    await expect(primaryRow).toContainText('inherit')
+    await page.getByTestId('ping-center-save-preview').click()
+    await page.getByTestId('ping-center-save-confirm').click()
+    expect(String(fixture.getSavedThemeSettings().nodeCardPingTaskBindings)).toBe(primaryBinding(202))
+    expect(inspectNodeCardMultiPingConfig(fixture.getSavedThemeSettings().nodeCardPingDisplayConfigV2).config?.nodes[PRIMARY_NODE_UUID]).toBeUndefined()
   })
 
-  test('saving cleanup removes deleted-node and no-longer-assigned task mappings', async ({ page }) => {
+  test('recovery removes orphaned and invalid v2 overrides without mutating downgrade-safe v1 mappings', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     const fixture = await installKomariFixture(page, {
       adminAccess: 'admin',
@@ -3008,10 +3050,23 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page, '/?view=pingsettings')
 
-    await expect(page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)).toContainText('失效绑定 · ID 303')
-    await page.getByRole('button', { name: '清理 1 条失效映射' }).click()
-    await expect(page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)).toContainText('未绑定')
-    expect(JSON.parse(String(fixture.getSavedThemeSettings().nodeCardPingTaskBindings))).toEqual({})
+    const legacyValue = JSON.stringify({
+      [PRIMARY_NODE_UUID]: 303,
+      '00000000-0000-4000-8000-000000000999': 202,
+    })
+    await expect(page.getByTestId('ping-center-orphan-config')).toContainText('1 个节点覆盖已失效')
+    await page.getByRole('button', { name: '移除失效覆盖' }).click()
+    const primaryRow = page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)
+    await expect(primaryRow).toContainText('失效')
+    await primaryRow.getByRole('button', { name: '单节点配置' }).click()
+    await page.getByTestId('ping-center-node-clear').click()
+    await page.getByRole('dialog').getByRole('button', { name: '完成' }).click()
+    await page.getByTestId('ping-center-save-preview').click()
+    await page.getByTestId('ping-center-save-confirm').click()
+    await expect.poll(() => fixture.getThemeSaveCount()).toBe(1)
+    await expect.poll(() => inspectNodeCardMultiPingConfig(fixture.getSavedThemeSettings().nodeCardPingDisplayConfigV2).status).toBe('valid')
+    expect(String(fixture.getSavedThemeSettings().nodeCardPingTaskBindings)).toBe(legacyValue)
+    expect(inspectNodeCardMultiPingConfig(fixture.getSavedThemeSettings().nodeCardPingDisplayConfigV2).config?.nodes).toEqual({})
   })
 
   test('guests can open the page shell without requesting or displaying administrator data', async ({ page }) => {
@@ -3024,10 +3079,10 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await installKomariFixture(page, { adminAccess: 'guest' })
     await openStablePage(page, '/?view=pingsettings')
-    await expect(page.getByTestId('node-ping-binding-unauthenticated')).toContainText('此页面仅允许已登录管理员操作。')
+    await expect(page.getByTestId('ping-center-settings-login-required')).toContainText('此配置仅允许已登录管理员读取和保存。')
     await expect(page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)).toHaveCount(0)
-    await expect(page.getByRole('textbox', { name: '搜索节点延迟任务绑定' })).toHaveCount(0)
-    await expect(page.getByRole('button', { name: '保存', exact: true })).toHaveCount(0)
+    await expect(page.getByTestId('ping-center-settings-search')).toHaveCount(0)
+    await expect(page.getByTestId('ping-center-save-preview')).toHaveCount(0)
     expect(adminRequests).toEqual([])
   })
 
@@ -3041,9 +3096,9 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await installKomariFixture(page, { adminAccess: 'forbidden' })
     await openStablePage(page, '/?view=pingsettings')
-    await expect(page.getByTestId('node-ping-binding-forbidden')).toContainText('当前账户没有管理员权限，无法读取或保存延迟任务绑定。')
+    await expect(page.getByTestId('node-ping-binding-forbidden')).toContainText('当前账户没有管理员权限，无法读取或保存 Ping 配置。')
     await expect(page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)).toHaveCount(0)
-    await expect(page.getByRole('button', { name: '保存', exact: true })).toHaveCount(0)
+    await expect(page.getByTestId('ping-center-save-preview')).toHaveCount(0)
     expect(adminRequests).toEqual(['GET /api/admin/ping'])
   })
 
@@ -3055,9 +3110,9 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page, '/?view=pingsettings')
 
-    await expect(page.getByRole('heading', { name: '延迟任务绑定', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Ping 监控中心', exact: true })).toBeVisible()
     await expect(page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)).toBeVisible()
-    await expect(page.getByRole('button', { name: '延迟任务绑定', exact: true })).toHaveCount(0)
+    await expect(page.getByTestId('ping-center-entry')).toHaveCount(0)
   })
 
   test('the binding page title and return action remain separated on mobile', async ({ page }) => {
@@ -3065,7 +3120,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await installKomariFixture(page, { adminAccess: 'admin' })
     await openStablePage(page, '/?view=pingsettings')
 
-    const heading = page.getByRole('heading', { name: '延迟任务绑定', exact: true })
+    const heading = page.getByRole('heading', { name: 'Ping 监控中心', exact: true })
     const returnButton = page.getByRole('button', { name: '返回首页' })
     await expect(heading).toBeVisible()
     await expect(returnButton).toBeVisible()
@@ -3081,10 +3136,11 @@ test.describe('node-card per-node ping task bindings', () => {
     await installKomariFixture(page, { adminAccess: 'guest', hidePingTaskBindingEntry: false })
     await openStablePage(page, '/?source=toolbar')
 
-    await page.getByRole('button', { name: '延迟任务绑定', exact: true }).click()
+    await page.getByTestId('ping-center-entry').click()
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('pingsettings')
     expect(new URL(page.url()).searchParams.get('source')).toBe('toolbar')
-    await expect(page.getByTestId('node-ping-binding-unauthenticated')).toBeVisible()
+    expect(new URL(page.url()).searchParams.get('pingtab')).toBe('overview')
+    await expect(page.getByTestId('ping-center-overview')).toBeVisible()
   })
 
   test('the legacy binding URL replaces itself with pingsettings without dropping other query parameters', async ({ page }) => {

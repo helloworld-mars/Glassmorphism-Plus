@@ -3,7 +3,7 @@ import type { PermissionKey } from '@/services/auth.service'
 import type { HomeQuickControlKey } from '@/stores/app'
 import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
-import { useDebounceFn } from '@vueuse/core'
+import { useDebounceFn, useMediaQuery } from '@vueuse/core'
 import { computed, defineAsyncComponent, nextTick, onActivated, onDeactivated, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DeferredRender from '@/components/DeferredRender.vue'
@@ -70,15 +70,16 @@ const { record: recordVisitorEvent } = useVisitorAudit()
 const isViewActive = ref(true)
 const pingSettingsView = 'pingsettings'
 const legacyPingSettingsView = 'node-ping-bindings'
-const isNodePingBindingsView = computed(() => route.query.view === pingSettingsView || route.query.view === legacyPingSettingsView)
+const isPingCenterView = computed(() => route.query.view === pingSettingsView || route.query.view === legacyPingSettingsView)
 
 watch(() => route.query.view, (view) => {
   if (view !== legacyPingSettingsView)
     return
 
+  const query = { ...route.query, view: pingSettingsView, pingtab: undefined }
   void router.replace({
     name: 'home',
-    query: { ...route.query, view: pingSettingsView },
+    query,
   })
 }, { immediate: true })
 
@@ -280,7 +281,34 @@ const isDenseNodeGrid = computed(() => appStore.nodeViewMode === 'card' && nodeL
 const enableNodeCardTransition = computed(() => !appStore.disablePageAnimation && !isDenseNodeGrid.value)
 const reduceDenseNodeEffects = computed(() => appStore.nodeViewMode === 'card' && nodeList.value.length > denseNodePingAnimationThreshold)
 const deferNodeCards = computed(() => appStore.nodeViewMode === 'card' && nodeList.value.length > UI_CONFIG.virtualList.nodeThreshold)
-const deferredNodeCardHeight = computed(() => ({ mini: 220, compact: 270, comfortable: 310, large: 350 }[appStore.nodeCardSize]))
+const isSmallViewportOrWider = useMediaQuery('(min-width: 640px)')
+
+function getDeferredNodeCardHeight(nodeUuid: string): number {
+  const size = appStore.nodeCardSize
+  const legacyBaseHeight = { mini: 220, compact: 270, comfortable: 310, large: 350 }[size]
+  const runtime = appStore.nodeCardMultiPingRuntimeConfig
+  const nodeConfig = runtime.config.nodes[nodeUuid.trim().toLowerCase()]
+  const usesMultiPing = runtime.source === 'v2'
+    && (nodeConfig?.mode === 'custom' || runtime.config.global.taskIds.length > 0)
+  if (!usesMultiPing)
+    return legacyBaseHeight
+
+  const displayCount = nodeConfig?.mode === 'custom'
+    ? nodeConfig.displayCount
+    : runtime.config.global.displayCount
+  if (size === 'mini')
+    return 244 + Math.max(0, displayCount - 1) * 42
+  if (size === 'compact')
+    return 290 + Math.max(0, displayCount - 1) * 54
+  if (size === 'comfortable') {
+    const extraRows = isSmallViewportOrWider.value && displayCount === 2
+      ? 0
+      : Math.max(0, displayCount - 1)
+    return 334 + extraRows * 62
+  }
+  const extraRows = isSmallViewportOrWider.value ? 0 : Math.max(0, displayCount - 1)
+  return 366 + extraRows * 62
+}
 
 const quickControlCounts = computed<Record<HomeQuickControlKey, number>>(() => {
   let base = groupNodeList.value
@@ -434,7 +462,7 @@ const nodeCardGridClass = computed(() => {
 
 <template>
   <div class="home-view" :class="!appStore.disablePageAnimation && 'home-view--motion'">
-    <NodePingBindingManager v-if="isNodePingBindingsView" />
+    <NodePingBindingManager v-if="isPingCenterView" />
     <template v-else>
       <div v-if="appStore.alertEnabled && appStore.alertContent" class="alert px-4">
         <Alert class="border-none bg-background/60 backdrop-blur-xs rounded-md">
@@ -576,7 +604,7 @@ const nodeCardGridClass = computed(() => {
                   <DeferredRender
                     :enabled="deferNodeCards"
                     :idle-delay="800 + index * 70"
-                    :min-height="deferredNodeCardHeight"
+                    :min-height="getDeferredNodeCardHeight(node.uuid)"
                   >
                     <NodeCard
                       :node="node"

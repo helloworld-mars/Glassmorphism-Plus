@@ -1,5 +1,11 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useNodeCardPingTaskCatalog } from '@/composables/useNodeCardPingTaskCatalog'
+import { useNodeMultiPingStats } from '@/composables/useNodeMultiPingStats'
 import { useNodePingDisplay } from '@/composables/useNodePingDisplay'
+import { useAppStore } from '@/stores/app'
+import { resolveNodeCardMultiPingDisplay } from '@/utils/nodeCardMultiPingConfig'
+import { getNodeCardPingTaskId } from '@/utils/nodeCardPingBindings'
 
 const props = defineProps<{
   uuid: string
@@ -11,10 +17,74 @@ const emit = defineEmits<{
   click: []
 }>()
 
-const {
-  latencyRenderBars,
-  lossRenderBars,
-} = useNodePingDisplay(() => props.uuid, { enabled: () => props.enabled })
+const appStore = useAppStore()
+const catalog = useNodeCardPingTaskCatalog()
+const resolution = computed(() => resolveNodeCardMultiPingDisplay(
+  appStore.nodeCardMultiPingRuntimeConfig,
+  props.uuid,
+  catalog.tasks.value,
+))
+const usesLegacy = computed(() => {
+  const runtime = appStore.nodeCardMultiPingRuntimeConfig
+  if (runtime.source !== 'v2')
+    return true
+  const nodeConfig = runtime.config.nodes[props.uuid.trim().toLowerCase()]
+  return nodeConfig?.mode !== 'custom' && runtime.config.global.taskIds.length === 0
+})
+const firstTask = computed(() => resolution.value.tasks.slice(0, 1).map(task => ({
+  taskId: task.id,
+  taskName: task.name,
+  intervalSeconds: task.interval,
+})))
+const { snapshots } = useNodeMultiPingStats(
+  () => props.uuid,
+  firstTask,
+  { enabled: () => props.enabled && !usesLegacy.value && catalog.loaded.value },
+)
+
+const legacySelectedTaskId = computed(() => appStore.nodeCardMultiPingRuntimeConfig.source === 'v2'
+  ? undefined
+  : getNodeCardPingTaskId(appStore.nodeCardPingTaskBindings, props.uuid))
+const legacyDisplay = useNodePingDisplay(() => props.uuid, {
+  enabled: () => props.enabled && usesLegacy.value,
+  selectedTaskId: legacySelectedTaskId,
+})
+
+const emptyBars = Array.from({ length: 20 }, (_, index) => ({
+  key: `empty-${index}`,
+  className: 'bg-muted-foreground/15',
+  tooltip: '等待 Ping 数据',
+}))
+const multiLatencyBars = computed(() => {
+  const history = snapshots.value[0]?.history
+  if (!history?.length)
+    return emptyBars
+  return history.map((point, index) => ({
+    key: `${point.time}-${index}`,
+    tooltip: point.time || '等待 Ping 数据',
+    className: point.latencyState === 'pending'
+      ? 'bg-transparent'
+      : point.latencyState === 'confirmed-missing'
+        ? 'bg-muted-foreground/15'
+        : 'bg-emerald-500/80',
+  }))
+})
+const multiLossBars = computed(() => {
+  const history = snapshots.value[0]?.history
+  if (!history?.length)
+    return emptyBars
+  return history.map((point, index) => ({
+    key: `${point.time}-${index}`,
+    tooltip: point.time || '等待 Ping 数据',
+    className: point.lossState === 'pending'
+      ? 'bg-transparent'
+      : point.lossState === 'confirmed-missing'
+        ? 'bg-muted-foreground/15'
+        : (point.loss ?? 0) > 0 ? 'bg-rose-500/80' : 'bg-emerald-500/80',
+  }))
+})
+const displayLatencyBars = computed(() => usesLegacy.value ? legacyDisplay.latencyRenderBars.value : multiLatencyBars.value)
+const displayLossBars = computed(() => usesLegacy.value ? legacyDisplay.lossRenderBars.value : multiLossBars.value)
 </script>
 
 <template>
@@ -27,10 +97,10 @@ const {
     <div class="group/panel relative items-center gap-1 opacity-80 hover:opacity-100">
       <div
         class="grid h-1 cursor-auto items-end gap-[1px] transition-all hover:h-2.5"
-        :style="{ gridTemplateColumns: `repeat(${latencyRenderBars.length}, minmax(0, 1fr))` }"
+        :style="{ gridTemplateColumns: `repeat(${displayLatencyBars.length}, minmax(0, 1fr))` }"
       >
         <span
-          v-for="bar in latencyRenderBars"
+          v-for="bar in displayLatencyBars"
           :key="bar.key"
           :title="bar.tooltip"
           :aria-label="bar.tooltip"
@@ -43,10 +113,10 @@ const {
     <div class="group/panel relative items-center gap-1 opacity-80 hover:opacity-100">
       <div
         class="grid h-1 cursor-auto items-end gap-[1px] transition-all hover:h-2.5"
-        :style="{ gridTemplateColumns: `repeat(${lossRenderBars.length}, minmax(0, 1fr))` }"
+        :style="{ gridTemplateColumns: `repeat(${displayLossBars.length}, minmax(0, 1fr))` }"
       >
         <span
-          v-for="bar in lossRenderBars"
+          v-for="bar in displayLossBars"
           :key="bar.key"
           :title="bar.tooltip"
           :aria-label="bar.tooltip"

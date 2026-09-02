@@ -49,12 +49,12 @@ const actionButtons = computed(() => {
     action: 'toggleTheme',
   })
 
-  if (router.currentRoute.value.name === 'home' && !appStore.hidePingTaskBindingEntry) {
+  if (router.currentRoute.value.name === 'home' && !appStore.loading && !appStore.hidePingTaskBindingEntry) {
     buttons.push({
-      title: '延迟任务绑定',
+      title: 'Ping 监控中心',
       icon: 'tabler:activity-heartbeat',
-      action: 'openNodePingBindings',
-      pressed: router.currentRoute.value.query.view === 'pingsettings',
+      action: 'openPingCenter',
+      pressed: ['pingsettings', 'node-ping-bindings'].includes(String(router.currentRoute.value.query.view ?? '')),
     })
   }
 
@@ -90,10 +90,10 @@ function handleButtonClick(action: string) {
       })
       location.href = '/admin'
       break
-    case 'openNodePingBindings':
+    case 'openPingCenter':
       void router.push({
         name: 'home',
-        query: { ...router.currentRoute.value.query, view: 'pingsettings' },
+        query: { ...router.currentRoute.value.query, view: 'pingsettings', pingtab: 'overview' },
       })
       break
   }
@@ -129,6 +129,7 @@ const sitename = computed(() => appStore.siteName)
                 size="icon-sm"
                 :aria-label="button.title"
                 :title="button.title"
+                :data-testid="button.action === 'openPingCenter' ? 'ping-center-entry' : undefined"
                 :aria-pressed="button.pressed"
                 :class="button.pressed && 'bg-background/70 text-selection'"
                 @click="handleButtonClick(button.action)"

@@ -5,6 +5,7 @@ import { useStorageAsync } from '@vueuse/core'
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { getAuthSession, requirePermission, setAuthSessionFromLogin, verifyLogin } from '@/services/auth.service'
+import { resolveNodeCardMultiPingRuntimeConfig } from '@/utils/nodeCardMultiPingConfig'
 import { parseNodeCardPingTaskBindings } from '@/utils/nodeCardPingBindings'
 
 export type ThemeMode = 'auto' | 'light' | 'dark'
@@ -966,6 +967,10 @@ const useAppStore = defineStore('app', () => {
   })
 
   const nodeCardPingTaskBindings = computed(() => parseNodeCardPingTaskBindings(themeSettings.value.nodeCardPingTaskBindings))
+  const nodeCardMultiPingRuntimeConfig = computed(() => resolveNodeCardMultiPingRuntimeConfig(
+    themeSettings.value.nodeCardPingDisplayConfigV2,
+    nodeCardPingTaskBindings.value,
+  ))
 
   // 当前实际使用的视图模式
   const nodeViewMode = computed<NodeViewMode>({
@@ -1317,6 +1322,7 @@ const useAppStore = defineStore('app', () => {
     defaultViewMode,
     nodeCardSize,
     nodeCardPingTaskBindings,
+    nodeCardMultiPingRuntimeConfig,
     rpcTransportMode,
     byteDecimals,
     alertEnabled,

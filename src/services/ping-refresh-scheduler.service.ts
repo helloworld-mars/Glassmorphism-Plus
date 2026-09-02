@@ -20,6 +20,7 @@ interface PingRefreshTarget {
   nextRefreshAt: number
   retryIndex: number
   running: boolean
+  refreshRequested: boolean
 }
 
 const REFRESH_CONFIG = CACHE_CONFIG.nodePingSummary.refresh
@@ -54,6 +55,7 @@ export class PingRefreshScheduler {
       nextRefreshAt: Date.now(),
       retryIndex: 0,
       running: false,
+      refreshRequested: false,
     }
 
     target.refresh = refresh
@@ -71,6 +73,10 @@ export class PingRefreshScheduler {
       refreshNow: () => {
         if (released)
           return
+        if (target.running) {
+          target.refreshRequested = true
+          return
+        }
         target.nextRefreshAt = Date.now()
         void this.tick()
       },
@@ -126,12 +132,20 @@ export class PingRefreshScheduler {
 
   private refreshAllNow(): void {
     const now = Date.now()
-    for (const target of this.targets.values())
-      target.nextRefreshAt = now
+    for (const target of this.targets.values()) {
+      if (target.running)
+        target.refreshRequested = true
+      else
+        target.nextRefreshAt = now
+    }
     void this.tick()
   }
 
   private async tick(): Promise<void> {
+    if ((typeof document !== 'undefined' && document.visibilityState === 'hidden')
+      || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
+      return
+    }
     const now = Date.now()
     const dueTargets = [...this.targets.values()]
       .filter(target => target.subscribers > 0 && !target.running && target.nextRefreshAt <= now)
@@ -188,6 +202,11 @@ export class PingRefreshScheduler {
     }
     finally {
       target.running = false
+      if (target.refreshRequested && target.subscribers > 0 && this.targets.get(target.key) === target) {
+        target.refreshRequested = false
+        target.nextRefreshAt = Date.now()
+        void this.tick()
+      }
     }
   }
 }

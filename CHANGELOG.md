@@ -2,6 +2,31 @@
 
 本文件只记录 **Glassmorphism Plus** 自己的发行版本。原始 Glassmorphism 的版本历史请查看[上游仓库](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases)；Plus 的选择性同步记录见 [UPSTREAM.md](UPSTREAM.md)。
 
+## [2.0.0] - 2026-09-02
+
+### Added
+
+- 首页节点卡支持按全局默认或每服务器 override 显示 1、2 或 3 个真实 Ping task，并完整适配 mini、compact、comfortable 与 large。
+- 将现有心跳入口升级为统一 Ping Center：访客可查看公开概览，管理员可配置全局默认、单服务器 override 与多服务器批量设置。
+- 新增版本化、不透明的 `nodeCardPingDisplayConfigV2`，含严格 parser、validator、deterministic serialization、coverage 与 orphan recovery。
+
+### Changed
+
+- 首页 Ping 数据改为 task-grouped 多 entity batching、精确 pair fallback、共享 Promise／cache／persistent snapshot，以及单一 sample-aware scheduler。
+- 列表模式显示第一个有效任务；详情页继续使用既有 aggregate Ping 图表，不把首页 selected-task 设置错误带入详情查询。
+- 测试构建不再生成 installer；只有正式 `bun run build` 会创建版本化本地 ZIP，避免覆盖历史 release artifact。
+
+### Compatibility and security
+
+- v1.x `nodeCardPingTaskBindings` 自动迁移为一任务显示且原始 bytes 保留，升级与降级均不丢设置。
+- 保存前重新读取最新管理员 settings，只 merge v2 key，并重新读取验证；401／403、logout、快速重新登录与 in-flight request 均按 session 隔离。
+- 每个 task 必须真实包含节点 UUID；Metric、Legacy、cache 和 fallback 均保持精确 node／task identity，不混入 aggregate 或其他任务数据。
+- 保留 `0 ms`、`0%`、`100% loss`、PENDING／DATA／CONFIRMED_MISSING、late backfill、outage gap 与长范围历史语义。
+
+### Credits
+
+- 多 Ping 配置与加载体验参考了 Komari-Theme-LuminaPlus 的公开行为；实现为 Glassmorphism Plus 架构内的 clean-room reimplementation，详见 [CREDITS.md](CREDITS.md)。
+
 ## [1.4.0] - 2026-08-24
 
 ### Changed
@@ -63,6 +88,7 @@
 
 Git tags `1.0`、`1.1` 与 `1.2` 指向同一历史 commit。现有证据不足以为这三个 tag 分别重建独立、可靠的变更列表，因此这里只保留历史事实，不推测具体修复内容。
 
+[2.0.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v1.4.0...v2.0.0
 [1.4.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v1.3.6...v1.4.0
 [1.3.6]: https://github.com/helloworld-mars/Glassmorphism-Plus/releases/tag/v1.3.6
 [1.3.5]: https://github.com/helloworld-mars/Glassmorphism-Plus/releases/tag/v1.3.5

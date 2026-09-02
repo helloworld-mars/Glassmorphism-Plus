@@ -1,19 +1,27 @@
 import process from 'node:process'
-import { defineConfig } from '@playwright/test'
+import { defineConfig, devices } from '@playwright/test'
 
 /**
- * A focused Safari-like runner. It has no visual snapshot project: WebKit is
- * used for viewport and dialog lifecycle assertions, while Chromium retains
- * the repository's established visual baselines.
+ * WebKit is a release gate, not a Chromium-snapshot substitute. Both native
+ * Playwright device contexts run the complete functional suite, while their
+ * visual baselines remain isolated by project name.
  */
 export default defineConfig({
   testDir: './tests/visual',
   outputDir: 'test-results/webkit-artifacts',
+  snapshotPathTemplate: '{testDir}/snapshots/{projectName}/{arg}{ext}',
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   workers: 1,
   reporter: [['list']],
+  expect: {
+    toHaveScreenshot: {
+      animations: 'disabled',
+      maxDiffPixelRatio: 0.05,
+      threshold: 0.25,
+    },
+  },
   use: {
     baseURL: 'http://127.0.0.1:4173',
     colorScheme: 'light',
@@ -24,14 +32,15 @@ export default defineConfig({
   },
   projects: [
     {
-      name: 'webkit-mobile',
+      name: 'webkit-desktop',
       use: {
-        browserName: 'webkit',
-        viewport: { width: 390, height: 844 },
-        deviceScaleFactor: 3,
-        hasTouch: true,
-        isMobile: true,
-        userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+        ...devices['Desktop Safari'],
+      },
+    },
+    {
+      name: 'webkit-iphone',
+      use: {
+        ...devices['iPhone 13'],
       },
     },
   ],

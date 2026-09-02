@@ -27,7 +27,9 @@ export interface VisualFixtureOptions {
   invalidExpiry?: boolean
   missingCpuMetricHistory?: boolean
   nodeCardPingTaskBindings?: string
+  nodeCardPingDisplayConfigV2?: string
   nodeCardPingFixture?: NodeCardPingFixture
+  nodeCount?: number
   clockNow?: string
   fakeTimers?: boolean
   preserveStorageOnReload?: boolean
@@ -75,6 +77,8 @@ export interface NodeCardPingFixture {
   task202Assigned?: boolean
   task202Latency?: number | null
   task202Loss?: number
+  /** Make task 303 available to every fixture node for v2 three-task layouts. */
+  thirdSharedTask?: boolean
   /** Sanitized shape observed in Komari 1.4.1 HAR responses. */
   komari141HarShape?: boolean
 }
@@ -127,10 +131,14 @@ export interface PingRpcTimelineEntry {
 export interface KomariFixtureController {
   setSiteName: (value: string) => void
   setNodeCardPingTaskBindings: (value: string) => void
+  setNodeCardPingDisplayConfigV2: (value: string) => void
+  setThemeSetting: (key: string, value: unknown) => void
+  setAdminAccess: (value: 'admin' | 'guest' | 'forbidden') => void
   setNodeCardPingFixture: (value: Partial<NodeCardPingFixture>) => void
   getSavedThemeSettings: () => Record<string, unknown>
   getThemeSaveCount: () => number
   pausePingResponses: () => () => void
+  pauseAdminResponses: () => () => void
   advanceTime: (milliseconds: number) => Promise<void>
   /** In-memory only; no HAR, storage state, or browser profile is produced. */
   timeline: PingRpcTimelineEntry[]
@@ -237,11 +245,14 @@ function resolveScheduledPingSamples(
     .sort((left, right) => left.sampleAt - right.sampleAt)
 }
 
-function allFixtureNodeUuids(): string[] {
-  return Array.from({ length: 12 }, (_, index) => uuidFor(index))
+function allFixtureNodeUuids(count = 12): string[] {
+  return Array.from({ length: count }, (_, index) => uuidFor(index))
 }
 
-function buildNodeCardPingTasks(fixture: NodeCardPingFixture): FixturePingTask[] {
+function buildNodeCardPingTasks(
+  fixture: NodeCardPingFixture,
+  assignedNodeUuids = allFixtureNodeUuids(),
+): FixturePingTask[] {
   const task202Assigned = fixture.task202Assigned ?? true
   const task202Exists = fixture.task202Exists ?? true
   const tasks: FixturePingTask[] = [
@@ -251,7 +262,7 @@ function buildNodeCardPingTasks(fixture: NodeCardPingFixture): FixturePingTask[]
       interval: 60,
       loss: 0,
       weight: 1,
-      clients: allFixtureNodeUuids(),
+      clients: assignedNodeUuids,
       type: 'tcp',
       target: 'tokyo.fixture.example:443',
     },
@@ -264,7 +275,7 @@ function buildNodeCardPingTasks(fixture: NodeCardPingFixture): FixturePingTask[]
       interval: 60,
       loss: fixture.task202Loss ?? 25,
       weight: 2,
-      clients: task202Assigned ? allFixtureNodeUuids() : [uuidFor(1)],
+      clients: task202Assigned ? assignedNodeUuids : [uuidFor(1)],
       type: 'icmp',
       target: 'hong-kong.fixture.example',
     })
@@ -276,7 +287,7 @@ function buildNodeCardPingTasks(fixture: NodeCardPingFixture): FixturePingTask[]
     interval: 120,
     loss: 0,
     weight: 3,
-    clients: [uuidFor(1)],
+    clients: fixture.thirdSharedTask ? assignedNodeUuids : [uuidFor(1)],
     type: 'http',
     target: 'https://seoul.fixture.example/health',
   })
@@ -292,10 +303,25 @@ function getFixturePingTaskIds(
   const taskId = typeof payload.task_id === 'string' || typeof payload.task_id === 'number'
     ? Number(payload.task_id)
     : Number((payload.tags as Record<string, unknown> | undefined)?.task_id)
-  const availableTaskIds = fixture.metric === 'selected-empty' ? [101] : [101, 202]
+  const availableTaskIds = fixture.metric === 'selected-empty'
+    ? [101]
+    : fixture.thirdSharedTask ? [101, 202, 303] : [101, 202]
   if (Number.isSafeInteger(taskId) && taskId > 0)
     return availableTaskIds.filter(id => id === taskId && !omittedTaskIds.includes(id))
   return availableTaskIds.filter(id => !omittedTaskIds.includes(id))
+}
+
+function getFixtureEntityIds(payload: Record<string, unknown>): string[] {
+  const batchIds = Array.isArray(payload.entity_ids)
+    ? payload.entity_ids.filter((value): value is string => typeof value === 'string' && value.length > 0)
+    : []
+  if (batchIds.length)
+    return [...new Set(batchIds)]
+  if (typeof payload.entity_id === 'string' && payload.entity_id)
+    return [payload.entity_id]
+  if (typeof payload.uuid === 'string' && payload.uuid)
+    return [payload.uuid]
+  return [uuidFor(0)]
 }
 
 function buildNodeCardPingSamplePoints(fixture: NodeCardPingFixture): Array<{ time: string | number, index: number }> {
@@ -355,7 +381,7 @@ function buildNodeCardPingMetricResponse(
   now: number,
 ) {
   const requested = Array.isArray(payload.metric_keys) ? payload.metric_keys.map(String) : ['ping.latency_ms', 'ping.loss']
-  const uuid = typeof payload.entity_id === 'string' ? payload.entity_id : uuidFor(0)
+  const entityIds = getFixtureEntityIds(payload)
   const taskIds = getFixturePingTaskIds(payload, fixture, fixture.metricQueryOmitTaskIds)
   const requestedStart = typeof payload.start === 'string' ? Date.parse(payload.start) : Number.NEGATIVE_INFINITY
   const requestedEnd = typeof payload.end === 'string' ? Date.parse(payload.end) : Number.POSITIVE_INFINITY
@@ -368,40 +394,42 @@ function buildNodeCardPingMetricResponse(
   ))
   const configuredSamples = selectedRange?.samples ?? fixture.metricSamples
   if (configuredSamples) {
-    const samples = configuredSamples
-      .map(sample => ({
-        ...sample,
-        timestamp: parseFixtureTimestamp(sample.time, 'configuredSamples.time'),
-        taskId: sample.taskId ?? 202,
-        client: sample.client ?? uuid,
-      }))
-      .filter(sample => sample.client === uuid
-        && taskIds.includes(sample.taskId)
-        && sample.timestamp >= requestedStart
-        && sample.timestamp < requestedEnd)
-      .sort((left, right) => left.timestamp - right.timestamp)
-    const series = requested.flatMap((metricKey) => {
-      if (metricKey !== 'ping.latency_ms' && metricKey !== 'ping.loss')
-        return []
-      return taskIds.flatMap((taskId) => {
-        const taskSamples = samples.filter(sample => sample.taskId === taskId)
-        if (!taskSamples.length)
+    const series = entityIds.flatMap((uuid) => {
+      const samples = configuredSamples
+        .map(sample => ({
+          ...sample,
+          timestamp: parseFixtureTimestamp(sample.time, 'configuredSamples.time'),
+          taskId: sample.taskId ?? 202,
+          client: sample.client ?? uuid,
+        }))
+        .filter(sample => sample.client === uuid
+          && taskIds.includes(sample.taskId)
+          && sample.timestamp >= requestedStart
+          && sample.timestamp < requestedEnd)
+        .sort((left, right) => left.timestamp - right.timestamp)
+      return requested.flatMap((metricKey) => {
+        if (metricKey !== 'ping.latency_ms' && metricKey !== 'ping.loss')
           return []
-        return [{
-          metric_key: metricKey,
-          entity_id: uuid,
-          type: 'gauge',
-          tags: { task_id: String(taskId), task_name: taskId === 202 ? 'Fixture Hong Kong' : 'Fixture Tokyo' },
-          downsampled: true,
-          fill_empty: true,
-          interval_seconds: selectedRange?.intervalSeconds ?? 60,
-          count: taskSamples.length,
-          points: taskSamples.map(sample => ({
-            time: new Date(sample.timestamp).toISOString(),
-            value: metricKey === 'ping.loss' ? sample.loss : sample.latency,
-            count: metricKey === 'ping.loss' ? sample.lossCount : sample.latencyCount,
-          })),
-        }]
+        return taskIds.flatMap((taskId) => {
+          const taskSamples = samples.filter(sample => sample.taskId === taskId)
+          if (!taskSamples.length)
+            return []
+          return [{
+            metric_key: metricKey,
+            entity_id: uuid,
+            type: 'gauge',
+            tags: { task_id: String(taskId), task_name: taskId === 202 ? 'Fixture Hong Kong' : 'Fixture Tokyo' },
+            downsampled: true,
+            fill_empty: true,
+            interval_seconds: selectedRange?.intervalSeconds ?? 60,
+            count: taskSamples.length,
+            points: taskSamples.map(sample => ({
+              time: new Date(sample.timestamp).toISOString(),
+              value: metricKey === 'ping.loss' ? sample.loss : sample.latency,
+              count: metricKey === 'ping.loss' ? sample.lossCount : sample.latencyCount,
+            })),
+          }]
+        })
       })
     })
     return {
@@ -411,59 +439,63 @@ function buildNodeCardPingMetricResponse(
       count: series.length,
     }
   }
-  const scheduledSamples = resolveScheduledPingSamples(fixture, uuid, now)
   const points = buildNodeCardPingSamplePoints(fixture)
-  const series = requested.flatMap((metricKey) => {
-    if (metricKey !== 'ping.latency_ms' && metricKey !== 'ping.loss')
-      return []
+  const scheduledByEntity = new Map(entityIds.map(uuid => [uuid, resolveScheduledPingSamples(fixture, uuid, now)]))
+  const series = entityIds
+    .filter(uuid => !fixture.metricErrorUuids?.includes(uuid))
+    .flatMap(uuid => requested.flatMap((metricKey) => {
+      if (metricKey !== 'ping.latency_ms' && metricKey !== 'ping.loss')
+        return []
 
-    return taskIds.map((taskId) => {
-      if (scheduledSamples) {
-        const taskSamples = scheduledSamples.filter(sample => sample.taskId === taskId)
+      return taskIds.map((taskId) => {
+        const scheduledSamples = scheduledByEntity.get(uuid)
+        if (scheduledSamples) {
+          const taskSamples = scheduledSamples.filter(sample => sample.taskId === taskId)
+          return {
+            metric_key: metricKey,
+            entity_id: uuid,
+            type: 'gauge',
+            tags: fixture.komari141HarShape
+              ? { task_id: String(taskId) }
+              : { task_id: String(taskId), task_name: taskId === 202 ? 'Fixture Hong Kong' : 'Fixture Tokyo' },
+            downsampled: false,
+            interval_seconds: 60,
+            count: taskSamples.length,
+            points: taskSamples.map(sample => ({
+              time: sample.time,
+              value: metricKey === 'ping.loss' ? sample.loss / 100 : sample.latency,
+              count: 1,
+              ...(fixture.komari141HarShape ? { tags: { task_id: String(taskId) } } : {}),
+            })),
+          }
+        }
+
+        const latency = taskId === 202
+          ? fixture.task202Latency === undefined ? 200 : fixture.task202Latency
+          : taskId === 303 ? 30 : 10
+        const loss = taskId === 202 ? (fixture.task202Loss ?? 25) / 100 : 0
         return {
           metric_key: metricKey,
           entity_id: uuid,
           type: 'gauge',
           tags: fixture.komari141HarShape
             ? { task_id: String(taskId) }
-            : { task_id: String(taskId), task_name: taskId === 202 ? 'Fixture Hong Kong' : 'Fixture Tokyo' },
+            : { task_id: String(taskId), task_name: taskId === 202 ? 'Fixture Hong Kong' : taskId === 303 ? 'Fixture Seoul' : 'Fixture Tokyo' },
           downsampled: false,
           interval_seconds: 60,
-          count: taskSamples.length,
-          points: taskSamples.map(sample => ({
-            time: sample.time,
-            value: metricKey === 'ping.loss' ? sample.loss / 100 : sample.latency,
+          count: points.length,
+          points: points.map(point => ({
+            time: point.time,
+            value: metricKey === 'ping.loss' ? loss : latency,
             count: 1,
             ...(fixture.komari141HarShape ? { tags: { task_id: String(taskId) } } : {}),
           })),
         }
-      }
-
-      const latency = taskId === 202
-        ? fixture.task202Latency === undefined ? 200 : fixture.task202Latency
-        : 10
-      const loss = taskId === 202 ? (fixture.task202Loss ?? 25) / 100 : 0
-      return {
-        metric_key: metricKey,
-        entity_id: uuid,
-        type: 'gauge',
-        tags: fixture.komari141HarShape
-          ? { task_id: String(taskId) }
-          : { task_id: String(taskId), task_name: taskId === 202 ? 'Fixture Hong Kong' : 'Fixture Tokyo' },
-        downsampled: false,
-        interval_seconds: 60,
-        count: points.length,
-        points: points.map(point => ({
-          time: point.time,
-          value: metricKey === 'ping.loss' ? loss : latency,
-          count: 1,
-          ...(fixture.komari141HarShape ? { tags: { task_id: String(taskId) } } : {}),
-        })),
-      }
-    })
-  })
-  const scheduledStart = scheduledSamples?.[0]?.time
-  const scheduledEnd = scheduledSamples?.at(-1)?.time
+      })
+    }))
+  const scheduledSamples = [...scheduledByEntity.values()].flatMap(samples => samples ?? [])
+  const scheduledStart = scheduledSamples[0]?.time
+  const scheduledEnd = scheduledSamples.at(-1)?.time
   return {
     start: String(scheduledStart ?? points[0]?.time ?? FIXED_NOW),
     end: String(scheduledEnd ?? points.at(-1)?.time ?? FIXED_NOW),
@@ -477,64 +509,69 @@ function buildNodeCardPingMetricStats(
   fixture: NodeCardPingFixture,
   now: number,
 ) {
-  const uuid = typeof payload.entity_id === 'string' ? payload.entity_id : uuidFor(0)
+  const entityIds = getFixtureEntityIds(payload)
   const taskIds = getFixturePingTaskIds(payload, fixture)
-  const scheduledSamples = resolveScheduledPingSamples(fixture, uuid, now)
-  if (scheduledSamples) {
-    const stats = taskIds.flatMap((taskId) => {
-      const taskSamples = scheduledSamples.filter(sample => sample.taskId === taskId)
-      if (!taskSamples.length)
-        return []
+  const scheduledByEntity = new Map(entityIds.map(uuid => [uuid, resolveScheduledPingSamples(fixture, uuid, now)]))
+  const scheduledSamples = [...scheduledByEntity.values()].flatMap(samples => samples ?? [])
+  if (scheduledByEntity.size && [...scheduledByEntity.values()].some(samples => samples !== null)) {
+    const stats = entityIds
+      .filter(uuid => !fixture.metricErrorUuids?.includes(uuid))
+      .flatMap(uuid => taskIds.flatMap((taskId) => {
+        const taskSamples = (scheduledByEntity.get(uuid) ?? []).filter(sample => sample.taskId === taskId)
+        if (!taskSamples.length)
+          return []
 
-      const latencySamples = taskSamples.filter((sample): sample is ResolvedScheduledPingSample & { latency: number } => sample.latency !== null)
-      const avg = latencySamples.length
-        ? latencySamples.reduce((total, sample) => total + sample.latency, 0) / latencySamples.length
-        : undefined
-      const latest = latencySamples.at(-1)?.latency
-      const loss = taskSamples.reduce((total, sample) => total + sample.loss, 0) / taskSamples.length
-      return [{
-        entity_id: uuid,
-        task_id: String(taskId),
-        name: taskId === 202 ? 'Fixture Hong Kong' : 'Fixture Tokyo',
-        tags: { task_id: String(taskId) },
-        interval: 60,
-        total: taskSamples.length,
-        valid: latencySamples.length,
-        avg,
-        latest,
-        loss,
-        ...(fixture.komari141HarShape ? {} : { loss_approximate: false }),
-      }]
-    })
+        const latencySamples = taskSamples.filter((sample): sample is ResolvedScheduledPingSample & { latency: number } => sample.latency !== null)
+        const avg = latencySamples.length
+          ? latencySamples.reduce((total, sample) => total + sample.latency, 0) / latencySamples.length
+          : undefined
+        const latest = latencySamples.at(-1)?.latency
+        const loss = taskSamples.reduce((total, sample) => total + sample.loss, 0) / taskSamples.length
+        return [{
+          entity_id: uuid,
+          task_id: String(taskId),
+          name: taskId === 202 ? 'Fixture Hong Kong' : taskId === 303 ? 'Fixture Seoul' : 'Fixture Tokyo',
+          tags: { task_id: String(taskId) },
+          interval: 60,
+          total: taskSamples.length,
+          valid: latencySamples.length,
+          avg,
+          latest,
+          loss,
+          ...(fixture.komari141HarShape ? {} : { loss_approximate: false }),
+        }]
+      }))
     const start = scheduledSamples[0]?.time ?? FIXED_NOW
     const end = scheduledSamples.at(-1)?.time ?? FIXED_NOW
     return { start, end, interval_seconds: 60, stats, count: stats.length }
   }
 
   const sampleCount = fixture.sampleTimes?.length ?? Math.max(1, Math.floor(fixture.sampleCount ?? 4))
-  const stats = taskIds.map((taskId) => {
-    const latency = taskId === 202
-      ? fixture.task202Latency === undefined ? 200 : fixture.task202Latency
-      : 10
-    const loss = taskId === 202 ? fixture.task202Loss ?? 25 : 0
-    return {
-      entity_id: uuid,
-      task_id: String(taskId),
-      name: taskId === 202 ? 'Fixture Hong Kong' : 'Fixture Tokyo',
-      tags: { task_id: String(taskId) },
-      total: Math.max(1, sampleCount),
-      valid: loss >= 100 ? 0 : Math.max(1, sampleCount - Math.round(loss / 25)),
-      avg: latency,
-      latest: latency,
-      loss,
-      ...(fixture.komari141HarShape ? {} : { loss_approximate: false }),
-    }
-  })
+  const stats = entityIds
+    .filter(uuid => !fixture.metricErrorUuids?.includes(uuid))
+    .flatMap(uuid => taskIds.map((taskId) => {
+      const latency = taskId === 202
+        ? fixture.task202Latency === undefined ? 200 : fixture.task202Latency
+        : taskId === 303 ? 30 : 10
+      const loss = taskId === 202 ? fixture.task202Loss ?? 25 : 0
+      return {
+        entity_id: uuid,
+        task_id: String(taskId),
+        name: taskId === 202 ? 'Fixture Hong Kong' : taskId === 303 ? 'Fixture Seoul' : 'Fixture Tokyo',
+        tags: { task_id: String(taskId) },
+        total: Math.max(1, sampleCount),
+        valid: loss >= 100 ? 0 : Math.max(1, sampleCount - Math.round(loss / 25)),
+        avg: latency,
+        latest: latency,
+        loss,
+        ...(fixture.komari141HarShape ? {} : { loss_approximate: false }),
+      }
+    }))
   return { start: FIXED_NOW, end: FIXED_NOW, interval_seconds: 60, stats, count: stats.length }
 }
 
-function buildClients(freePriceNode = false, expiryThresholds = false, invalidExpiry = false) {
-  return Object.fromEntries(Array.from({ length: 12 }, (_, index) => {
+function buildClients(freePriceNode = false, expiryThresholds = false, invalidExpiry = false, count = 12) {
+  return Object.fromEntries(Array.from({ length: count }, (_, index) => {
     const fixture = REGION_FIXTURES[index % REGION_FIXTURES.length]
     const uuid = uuidFor(index)
     return [uuid, {
@@ -579,8 +616,8 @@ function buildClients(freePriceNode = false, expiryThresholds = false, invalidEx
   }))
 }
 
-function buildStatuses() {
-  return Object.fromEntries(Array.from({ length: 12 }, (_, index) => {
+function buildStatuses(count = 12) {
+  return Object.fromEntries(Array.from({ length: count }, (_, index) => {
     const uuid = uuidFor(index)
     const offline = index === 5
     const highLoad = index === 2
@@ -751,15 +788,14 @@ function isPingMetricRequest(method: string, params: Record<string, unknown> | u
 }
 
 function pingRequestUuid(params: Record<string, unknown> | undefined): string {
-  return typeof params?.entity_id === 'string'
-    ? params.entity_id
-    : typeof params?.uuid === 'string'
-      ? params.uuid
-      : uuidFor(0)
+  return getFixtureEntityIds(params)[0] ?? uuidFor(0)
 }
 
 function shouldFailPingMetric(params: Record<string, unknown> | undefined, fixture: NodeCardPingFixture): boolean {
-  return fixture.metric === 'error' || fixture.metricErrorUuids?.includes(pingRequestUuid(params)) === true
+  if (fixture.metric === 'error')
+    return true
+  const entityIds = getFixtureEntityIds(params)
+  return entityIds.length === 1 && fixture.metricErrorUuids?.includes(entityIds[0]) === true
 }
 
 function shouldFailTaggedPingMetricQuery(params: Record<string, unknown> | undefined, fixture: NodeCardPingFixture): boolean {
@@ -794,6 +830,7 @@ function getPingResponseSamples(
 async function handleRpc(
   route: Route,
   clientFixtures = clients,
+  statusFixtures = statuses,
   nodeCardPingFixture?: NodeCardPingFixture,
   pingResponseGate?: PingResponseGate,
   missingCpuMetricHistory = false,
@@ -832,7 +869,7 @@ async function handleRpc(
     ? buildNodeCardPingRecords(uuid, nodeCardPingFixture, responseAt)
     : Array.from({ length: 48 }, (_, index) => ({ task_id: 1, client: uuid, time: new Date(Date.parse(FIXED_NOW) - (47 - index) * 75_000).toISOString(), value: index % 17 === 0 ? -1 : 76 + index }))
   const pingTasks = nodeCardPingFixture
-    ? buildNodeCardPingTasks(nodeCardPingFixture)
+    ? buildNodeCardPingTasks(nodeCardPingFixture, Object.keys(clientFixtures))
     : [{ id: 1, name: 'Tokyo', interval: 60, loss: 3.2, weight: 1 }]
 
   let result: unknown
@@ -846,7 +883,7 @@ async function handleRpc(
       result = clientFixtures
       break
     case 'common:getNodesLatestStatus':
-      result = statuses
+      result = statusFixtures
       break
     case 'common:getNodeRecentStatus':
       result = { count: 48, records: buildRecords(uuid) }
@@ -959,10 +996,16 @@ async function handleRpc(
 }
 
 export async function installKomariFixture(page: Page, options: VisualFixtureOptions = {}): Promise<KomariFixtureController> {
-  const clientFixtures = options.freePriceNode || options.expiryThresholds || options.invalidExpiry
-    ? buildClients(options.freePriceNode, options.expiryThresholds, options.invalidExpiry)
-    : clients
+  const nodeCount = Math.max(1, Math.floor(options.nodeCount ?? 12))
+  const clientFixtures = buildClients(
+    options.freePriceNode,
+    options.expiryThresholds,
+    options.invalidExpiry,
+    nodeCount,
+  )
+  const statusFixtures = buildStatuses(nodeCount)
   const pingResponseGate = createPingResponseGate()
+  const adminResponseGate = createPingResponseGate()
   const pingTimeline: PingRpcTimelineEntry[] = []
   let currentNow = parseFixtureTimestamp(options.clockNow ?? FIXED_NOW, 'clockNow')
   const readBrowserNow = async (): Promise<number> => {
@@ -977,7 +1020,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     return currentNow
   }
   let nodeCardPingFixture = options.nodeCardPingFixture
-  const adminAccess = options.adminAccess ?? 'guest'
+  let adminAccess = options.adminAccess ?? 'guest'
   let siteName = options.siteName ?? 'Komari Visual Lab'
   let themeSaveCount = 0
   let settings: Record<string, unknown> = {
@@ -1005,6 +1048,9 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     )).join('\n'),
     hidePingTaskBindingEntry: options.hidePingTaskBindingEntry ?? false,
     nodeCardPingTaskBindings: options.nodeCardPingTaskBindings ?? '{}',
+    ...(options.nodeCardPingDisplayConfigV2 === undefined
+      ? {}
+      : { nodeCardPingDisplayConfigV2: options.nodeCardPingDisplayConfigV2 }),
     fixtureUnrelatedSetting: 'preserve-me',
   }
 
@@ -1094,6 +1140,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
   await page.route('**/rpc2', route => handleRpc(
     route,
     clientFixtures,
+    statusFixtures,
     nodeCardPingFixture,
     pingResponseGate,
     options.missingCpuMetricHistory ?? false,
@@ -1102,6 +1149,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     pingTimeline,
   ))
   await page.route('**/api/admin/ping', async (route) => {
+    await adminResponseGate.wait()
     if (adminAccess !== 'admin') {
       await route.fulfill({
         status: adminAccess === 'forbidden' ? 403 : 401,
@@ -1112,10 +1160,11 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     }
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ status: 'success', message: 'ok', data: buildNodeCardPingTasks(nodeCardPingFixture ?? {}) }),
+      body: JSON.stringify({ status: 'success', message: 'ok', data: buildNodeCardPingTasks(nodeCardPingFixture ?? {}, Object.keys(clientFixtures)) }),
     })
   })
   await page.route('**/api/admin/client/list', async (route) => {
+    await adminResponseGate.wait()
     if (adminAccess !== 'admin') {
       await route.fulfill({
         status: adminAccess === 'forbidden' ? 403 : 401,
@@ -1127,6 +1176,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(Object.values(clientFixtures)) })
   })
   await page.route('**/api/admin/theme/settings?*', async (route) => {
+    await adminResponseGate.wait()
     if (adminAccess !== 'admin') {
       await route.fulfill({
         status: adminAccess === 'forbidden' ? 403 : 401,
@@ -1156,12 +1206,22 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     setNodeCardPingTaskBindings: (value) => {
       settings.nodeCardPingTaskBindings = value
     },
+    setNodeCardPingDisplayConfigV2: (value) => {
+      settings.nodeCardPingDisplayConfigV2 = value
+    },
+    setThemeSetting: (key, value) => {
+      settings[key] = value
+    },
+    setAdminAccess: (value) => {
+      adminAccess = value
+    },
     setNodeCardPingFixture: (value) => {
       nodeCardPingFixture = { ...(nodeCardPingFixture ?? {}), ...value }
     },
     getSavedThemeSettings: () => ({ ...settings }),
     getThemeSaveCount: () => themeSaveCount,
     pausePingResponses: () => pingResponseGate.pause(),
+    pauseAdminResponses: () => adminResponseGate.pause(),
     advanceTime: async (milliseconds) => {
       if (options.fakeTimers) {
         // Step fake time at the scheduler's one-second cadence. A single large
