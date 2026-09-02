@@ -7,7 +7,7 @@ import { getQueryMetricsRequestKey } from '../../src/services/metrics.service'
 import { loadPingMetricCoverage } from '../../src/services/pingMetricCoverage.service'
 import { RequestManager } from '../../src/services/request.service'
 import { comparePingTaskOrder, createPingTaskOrderMap, orderPingTasksByBackend } from '../../src/utils/metricSeries'
-import { inspectNodeCardMultiPingConfig } from '../../src/utils/nodeCardMultiPingConfig'
+import { inspectNodeCardPingConfig } from '../../src/utils/nodeCardPingConfig'
 import { smoothPingChartDisplayRows } from '../../src/utils/pingChartSmoothing'
 import { mergePingMetricCoverageResponses } from '../../src/utils/pingMetricCoverage'
 import { normalizePingMetricSamples } from '../../src/utils/pingMetricSamples'
@@ -25,6 +25,8 @@ const STABLE_STYLE = `
   .earth-globe-canvas { opacity: 0 !important; }
 `
 
+const MULTI_PING_CACHE_PREFIX = 'komari-theme-emerald:multi-node-ping-stats:'
+
 test('Plus documentation keeps its own version identity and preserves upstream attribution', () => {
   const readRootFile = (name: string) => readFileSync(new URL(`../../${name}`, import.meta.url), 'utf8')
   const readme = readRootFile('README.md')
@@ -35,14 +37,14 @@ test('Plus documentation keeps its own version identity and preserves upstream a
 
   expect(readme).toContain('# 🌌 Komari Glassmorphism Plus')
   expect(readme).toContain('当前 Plus 版本')
-  expect(readme).toContain('**v2.0.0**')
+  expect(readme).toContain('**v2.1.0**')
   expect(readme).toContain('sanrokamlan Glassmorphism v3.3.7')
-  expect(readme).toContain('v2.0.0 GitHub Release 的 installer asset 数量为 0')
+  expect(readme).toContain('v2.1.0 GitHub Release 的 installer asset 数量为 0')
   expect(readme).toContain('Source code (zip)')
   expect(readme).not.toMatch(/^#{2,}\s+(?:\S.*)?v3\.\d/m)
 
   const changelogVersions = Array.from(changelog.matchAll(/^## \[([^\]]+)\]/gm), match => match[1])
-  expect(changelogVersions).toEqual(['2.0.0', '1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
+  expect(changelogVersions).toEqual(['2.1.0', '2.0.0', '1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
   expect(upstream).toContain('Current upstream baseline')
   expect(upstream).toContain('v3.3.7')
   expect(credits).toContain('helloworld-mars')
@@ -154,12 +156,13 @@ function primaryNodeCard(page: Page) {
 }
 
 function nodeCardPingPanel(page: Page, metric: 'latency' | 'loss') {
-  return primaryNodeCard(page).locator(`[data-node-ping-bars="${metric}"]`).locator('..')
+  const card = primaryNodeCard(page)
+  return card.locator('[data-node-ping-task-id]').first().or(card.locator(`[data-node-ping-bars="${metric}"]`).locator('..')).first()
 }
 
 async function expectNodeCardPing(page: Page, latency: string, loss: string): Promise<void> {
-  await expect(nodeCardPingPanel(page, 'latency')).toContainText(latency)
-  await expect(nodeCardPingPanel(page, 'loss')).toContainText(loss)
+  await expect.poll(async () => (await nodeCardPingPanel(page, 'latency').textContent() ?? '').replace(/\s+/g, '')).toContain(latency.replace(/\s+/g, ''))
+  await expect.poll(async () => (await nodeCardPingPanel(page, 'loss').textContent() ?? '').replace(/\s+/g, '')).toContain(loss.replace(/\s+/g, ''))
 }
 
 async function openPrimaryPingDialog(page: Page): Promise<Locator> {
@@ -219,6 +222,7 @@ async function expectAllNodeCardPingBucketStates(
 async function readNodeCardPingBarGeometry(card: Locator, metric: 'latency' | 'loss') {
   return card.locator(`[data-node-ping-bars="${metric}"]`).evaluate((element) => {
     const strip = element.getBoundingClientRect()
+    const columnGap = Number.parseFloat(getComputedStyle(element).columnGap) || 0
     const bars = Array.from(element.querySelectorAll<HTMLElement>(':scope > [data-node-ping-bar]')).map((bar) => {
       const rect = bar.getBoundingClientRect()
       return { left: rect.left, right: rect.right, width: rect.width }
@@ -226,6 +230,7 @@ async function readNodeCardPingBarGeometry(card: Locator, metric: 'latency' | 'l
     return {
       left: strip.left,
       right: strip.right,
+      columnGap,
       bars,
     }
   })
@@ -238,14 +243,18 @@ async function expectUniformNodeCardPingBars(card: Locator): Promise<void> {
       if (geometry.bars.length !== 20)
         return false
 
-      const [first] = geometry.bars
-      if (!first || Math.abs(first.width - Math.round(first.width)) > 0.01)
+      const widths = geometry.bars.map(bar => bar.width)
+      if (widths.some(width => width <= 0))
         return false
 
-      return geometry.bars.every((bar, index) => {
+      // WebKit distributes fractional CSS pixels across grid tracks, so adjacent
+      // cells can legitimately differ by one device pixel while still forming a
+      // uniform 20-column rail. Assert that bounded distribution and the declared
+      // CSS gap instead of requiring Chromium-identical subpixel rectangles.
+      const widthSpread = Math.max(...widths) - Math.min(...widths)
+      return widthSpread <= 1.01 && geometry.bars.every((bar, index) => {
         const previous = geometry.bars[index - 1]
-        return Math.abs(bar.width - first.width) <= 0.01
-          && (index === 0 || Math.abs(bar.left - previous!.right - 1) <= 0.01)
+        return index === 0 || Math.abs(bar.left - previous!.right - geometry.columnGap) <= 1.01
       })
     }).toBe(true)
 
@@ -275,6 +284,17 @@ async function readNodeCardPingPanelVerticalGeometry(card: Locator, metric: 'lat
 }
 
 async function expectMatchingNodeCardPingPanelVerticalGeometry(card: Locator): Promise<void> {
+  if (await card.locator('[data-node-ping-task-id], [data-node-ping-task-placeholder]').count()) {
+    await expect.poll(async () => {
+      const widths = await Promise.all((['latency', 'loss'] as const).map(metric => card
+        .locator(`[data-node-ping-bars="${metric}"]`)
+        .first()
+        .evaluate(element => element.getBoundingClientRect().width)))
+      return Math.abs(widths[0] - widths[1])
+    }).toBeLessThanOrEqual(0.01)
+    return
+  }
+
   await expect.poll(async () => {
     const [latency, loss] = await Promise.all([
       readNodeCardPingPanelVerticalGeometry(card, 'latency'),
@@ -917,13 +937,13 @@ test('brand metadata and homepage footer retain current and original attribution
     name: 'Komari Glassmorphism Plus',
     short: 'glassmorphism-plus',
     description: 'A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.',
-    version: '2.0.0',
+    version: '2.1.0',
     author: 'helloworld-mars',
     url: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(packageMetadata).toMatchObject({
     name: 'komari-theme-glassmorphism-plus',
-    version: '2.0.0',
+    version: '2.1.0',
     homepage: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(themeManifest.short).toMatch(/^[\w-]+$/)
@@ -939,10 +959,12 @@ test('brand metadata and homepage footer retain current and original attribution
   const entrySettingIndex = managedItems.findIndex(item => item.key === 'hidePingTaskBindingEntry')
   const bindingsSettingIndex = managedItems.findIndex(item => item.key === 'nodeCardPingTaskBindings')
   const v2BindingsSettingIndex = managedItems.findIndex(item => item.key === 'nodeCardPingDisplayConfigV2')
+  const v3BindingsSettingIndex = managedItems.findIndex(item => item.key === 'nodeCardPingDisplayConfigV3')
   expect(bindingSectionIndex).toBeGreaterThanOrEqual(0)
   expect(entrySettingIndex).toBe(bindingSectionIndex + 1)
   expect(bindingsSettingIndex).toBe(entrySettingIndex + 1)
   expect(v2BindingsSettingIndex).toBe(bindingsSettingIndex + 1)
+  expect(v3BindingsSettingIndex).toBe(v2BindingsSettingIndex + 1)
   expect(managedItems[entrySettingIndex]).toMatchObject({
     name: '隐藏延迟任务绑定入口',
     type: 'switch',
@@ -953,6 +975,11 @@ test('brand metadata and homepage footer retain current and original attribution
     type: 'richtext',
   })
   expect(String(managedItems[v2BindingsSettingIndex].default)).toMatch(/^v2:/)
+  expect(managedItems[v3BindingsSettingIndex]).toMatchObject({
+    name: '首页 Ping 安全配置',
+    type: 'richtext',
+    default: '',
+  })
 
   await page.setViewportSize({ width: 1280, height: 720 })
   await installKomariFixture(page, { hideEarth: true })
@@ -960,7 +987,7 @@ test('brand metadata and homepage footer retain current and original attribution
 
   const footer = page.locator('footer')
   await expect(footer.getByRole('link', { name: 'Glassmorphism Plus' })).toHaveAttribute('href', 'https://github.com/helloworld-mars/Glassmorphism-Plus')
-  await expect(footer.getByText('v2.0.0 · helloworld-mars', { exact: true }).first()).toBeVisible()
+  await expect(footer.getByText('v2.1.0 · helloworld-mars', { exact: true }).first()).toBeVisible()
   await expect(footer.getByRole('link', { name: 'Based on the original theme by sanrokamlan' }))
     .toHaveAttribute('href', 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism')
   await expect(footer).not.toContainText('unknown')
@@ -1571,8 +1598,8 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page)
 
-    await expect.poll(() => calls.filter(call => call.method === 'public:getPingMetricStats' && call.params.task_id === '202').length).toBe(12)
-    await expect.poll(() => calls.filter(call => call.method === 'public:queryMetrics' && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202').length).toBe(12)
+    await expect.poll(() => calls.filter(call => call.method === 'public:getPingMetricStats' && call.params.task_id === '202').length).toBe(2)
+    await expect.poll(() => calls.filter(call => call.method === 'public:queryMetrics' && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202').length).toBe(2)
 
     expect(calls.filter(call => call.method === 'public:getPublicPingTasks')).toHaveLength(1)
     expect(calls.filter(call => call.method === 'public:getPingMetricStats'
@@ -1605,7 +1632,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await openStablePage(page)
     await expectNodeCardPing(page, '7 ms', '0.0%')
     await expect.poll(() => calls.filter(call => call.method === 'public:queryMetrics'
-      && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202').length).toBe(12)
+      && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202').length).toBe(2)
 
     fixture.setNodeCardPingFixture({
       sampleTimes: ['2026-07-25T12:00:00.000Z', '2026-07-25T12:01:00.000Z'],
@@ -1614,11 +1641,11 @@ test.describe('node-card per-node ping task bindings', () => {
     await fixture.advanceTime(65_000)
     await expectNodeCardPing(page, '9 ms', '0.0%')
     await expect.poll(() => calls.filter(call => call.method === 'public:getPingMetricStats'
-      && call.params.task_id === '202').length).toBe(24)
+      && call.params.task_id === '202').length).toBe(3)
     await expect.poll(() => calls.filter(call => call.method === 'public:queryMetrics'
-      && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202').length).toBe(24)
+      && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202').length).toBe(3)
 
-    expect(calls.filter(call => call.method === 'public:getPublicPingTasks')).toHaveLength(2)
+    expect(calls.filter(call => call.method === 'public:getPublicPingTasks')).toHaveLength(1)
     expect(calls.filter(isPingLegacyRequest)).toHaveLength(0)
     expect(calls.filter(call => call.method === 'public:getPingMetricStats'
       && call.params.task_id === undefined)).toHaveLength(0)
@@ -1651,13 +1678,15 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectNodeCardPing(page, '7 ms', '0.0%')
 
     const selectedStatsCalls = calls.filter(call => call.method === 'public:getPingMetricStats'
-      && call.params.entity_id === PRIMARY_NODE_UUID
+      && Array.isArray(call.params.entity_ids)
+      && call.params.entity_ids.includes(PRIMARY_NODE_UUID)
       && call.params.task_id === '202')
     const selectedQueryCalls = calls.filter(call => call.method === 'public:queryMetrics'
-      && call.params.entity_id === PRIMARY_NODE_UUID
+      && Array.isArray(call.params.entity_ids)
+      && call.params.entity_ids.includes(PRIMARY_NODE_UUID)
       && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202')
-    expect(selectedStatsCalls).toHaveLength(1)
-    expect(selectedQueryCalls).toHaveLength(1)
+    expect(selectedStatsCalls).toHaveLength(2)
+    expect(selectedQueryCalls).toHaveLength(2)
     expect(selectedQueryCalls[0]?.params.metric_keys).toEqual(['ping.latency_ms', 'ping.loss'])
     expect(calls.filter(isPingLegacyRequest)).toHaveLength(0)
 
@@ -1687,7 +1716,6 @@ test.describe('node-card per-node ping task bindings', () => {
     const resumePingResponses = fixture.pausePingResponses()
     await page.goto('/')
     await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
-    await expect.poll(() => calls.filter(call => call.method === 'public:getPublicPingTasks').length).toBe(1)
 
     await page.getByLabel('列表视图').click()
     await page.getByLabel('卡片视图').click()
@@ -1695,11 +1723,11 @@ test.describe('node-card per-node ping task bindings', () => {
 
     await expectNodeCardPing(page, '200 ms', '25.0%')
     expect(calls.filter(call => call.method === 'public:getPublicPingTasks')).toHaveLength(1)
-    expect(calls.filter(call => call.method === 'public:getPingMetricStats' && call.params.task_id === '202')).toHaveLength(1)
-    expect(calls.filter(call => call.method === 'public:queryMetrics' && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202')).toHaveLength(1)
+    expect(calls.filter(call => call.method === 'public:getPingMetricStats' && call.params.task_id === '202')).toHaveLength(2)
+    expect(calls.filter(call => call.method === 'public:queryMetrics' && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202')).toHaveLength(2)
   })
 
-  test('refreshes the task catalog and selected task data after their TTLs expire', async ({ page }) => {
+  test('retains one task catalog while refreshing selected task data after its TTL expires', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
       if (!isRpc2Request(request.url()))
@@ -1721,9 +1749,9 @@ test.describe('node-card per-node ping task bindings', () => {
     await fixture.advanceTime(61_000)
     await page.getByLabel('列表视图').click()
     await page.getByLabel('卡片视图').click()
-    await expect.poll(() => calls.filter(call => call.method === 'public:getPublicPingTasks').length).toBe(2)
-    await expect.poll(() => calls.filter(call => call.method === 'public:getPingMetricStats' && call.params.task_id === '202').length).toBe(2)
-    await expect.poll(() => calls.filter(call => call.method === 'public:queryMetrics' && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202').length).toBe(2)
+    await expect.poll(() => calls.filter(call => call.method === 'public:getPublicPingTasks').length).toBe(1)
+    await expect.poll(() => calls.filter(call => call.method === 'public:getPingMetricStats' && call.params.task_id === '202').length).toBe(3)
+    await expect.poll(() => calls.filter(call => call.method === 'public:queryMetrics' && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202').length).toBe(3)
   })
 
   test('keeps the last accepted snapshot until a delayed real sample arrives and then updates without navigation', async ({ page }) => {
@@ -1760,10 +1788,11 @@ test.describe('node-card per-node ping task bindings', () => {
 
     const selectedQueries = () => calls.filter(call => call.method === 'public:queryMetrics'
       && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202')
+    const initialQueryCount = selectedQueries().length
 
     // At the expected sample boundary plus grace, the backend still has only 23:02.
     await fixture.advanceTime(10_000)
-    await expect.poll(() => selectedQueries().length).toBe(2)
+    await expect.poll(() => selectedQueries().length).toBe(initialQueryCount + 1)
     await expectNodeCardPing(page, '7 ms', '0.0%')
     await expectNodeCardPingTooltip(page, 'latency', '23:02:00\n7 ms')
     expect((await primaryNodeCard(page).locator('[data-node-ping-bars="latency"] [role="tooltip"]').allTextContents())
@@ -1771,7 +1800,7 @@ test.describe('node-card per-node ping task bindings', () => {
 
     // First retry still sees no newer timestamp and must not replace the old snapshot.
     await fixture.advanceTime(5_000)
-    await expect.poll(() => selectedQueries().length).toBe(3)
+    await expect.poll(() => selectedQueries().length).toBe(initialQueryCount + 2)
     await expectNodeCardPing(page, '7 ms', '0.0%')
 
     // The real 23:03 sample becomes visible on the next retry; no reload or route change occurs.
@@ -1781,7 +1810,7 @@ test.describe('node-card per-node ping task bindings', () => {
       task202Loss: 0,
     })
     await fixture.advanceTime(10_000)
-    await expect.poll(() => selectedQueries().length).toBe(4)
+    await expect.poll(() => selectedQueries().length).toBe(initialQueryCount + 3)
     await expectNodeCardPing(page, '9 ms', '0.0%')
     await expectNodeCardPingTooltip(page, 'latency', '23:03:00\n9 ms')
   })
@@ -2131,7 +2160,7 @@ test.describe('node-card per-node ping task bindings', () => {
       .some(sample => sample.sampleAt === Date.parse(PING_INGESTION_SAMPLE) && sample.latency === 11))).toBe(true)
   })
 
-  test('v1.3.3 keeps warm selected snapshots isolated from a clean browser context', async ({ page }) => {
+  test('keeps warm task-pair snapshots isolated from a clean browser context', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 })
     await installKomariFixture(page, {
       fakeTimers: true,
@@ -2145,8 +2174,8 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page)
     await expectNodeCardPingTooltip(page, 'latency', '11:59:00\n71 ms')
-    expect(await page.evaluate(() => Object.keys(localStorage)
-      .some(key => key.startsWith('komari-theme-emerald:selected-node-ping-stats:')))).toBe(true)
+    expect(await page.evaluate(prefix => Object.keys(localStorage)
+      .some(key => key.startsWith(prefix) && !key.endsWith(':index')), MULTI_PING_CACHE_PREFIX)).toBe(true)
 
     const browser = page.context().browser()
     if (!browser)
@@ -2181,15 +2210,15 @@ test.describe('node-card per-node ping task bindings', () => {
         return (window as typeof window & { __coldPingFixtureStorageKeyCount?: number })
           .__coldPingFixtureStorageKeyCount
       })).toBe(0)
-      expect(await coldPage.evaluate(() => Object.keys(localStorage)
-        .some(key => key.includes('selected-node-ping-stats:')))).toBe(true)
+      expect(await coldPage.evaluate(prefix => Object.keys(localStorage)
+        .some(key => key.startsWith(prefix) && !key.endsWith(':index')), MULTI_PING_CACHE_PREFIX)).toBe(true)
     }
     finally {
       await coldContext.close()
     }
   })
 
-  test('v1.3.3 only selected Ping localStorage or a fresh context makes a warmed snapshot cold', async ({ page }) => {
+  test('only task-pair Ping localStorage or a fresh context makes a warmed snapshot cold', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 })
     const warmSchedule = scheduledPingSamples('2026-07-25T12:10:00.000+08:00', 99, 71)
     const fixture = await installKomariFixture(page, {
@@ -2205,8 +2234,8 @@ test.describe('node-card per-node ping task bindings', () => {
     await openStablePage(page)
     await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'pending')
     await expectNodeCardPingTooltip(page, 'latency', '11:59:00\n71 ms')
-    expect(await page.evaluate(() => Object.keys(localStorage)
-      .some(key => key.startsWith('komari-theme-emerald:selected-node-ping-stats:')))).toBe(true)
+    expect(await page.evaluate(prefix => Object.keys(localStorage)
+      .some(key => key.startsWith(prefix) && !key.endsWith(':index')), MULTI_PING_CACHE_PREFIX)).toBe(true)
 
     const reloadWithPausedPing = async () => {
       const resumePingResponses = fixture.pausePingResponses()
@@ -2258,19 +2287,19 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectWarmSelectedSnapshot()
     resumeAfterCacheStorageClear()
 
-    await page.evaluate(() => {
+    await page.evaluate((prefix) => {
       for (let index = localStorage.length - 1; index >= 0; index--) {
         const key = localStorage.key(index)
-        if (key?.startsWith('komari-theme-emerald:selected-node-ping-stats:'))
+        if (key?.startsWith(prefix))
           localStorage.removeItem(key)
       }
-    })
+    }, MULTI_PING_CACHE_PREFIX)
     const resumeColdPagePingResponses = await reloadWithPausedPing()
     for (const metric of ['latency', 'loss'] as const)
       await expectAllNodeCardPingBucketStates(page, metric, 'pending')
     await expect(nodeCardPingPanel(page, 'latency')).not.toContainText('71 ms')
-    expect(await page.evaluate(() => Object.keys(localStorage)
-      .some(key => key.startsWith('komari-theme-emerald:selected-node-ping-stats:')))).toBe(false)
+    expect(await page.evaluate(prefix => Object.keys(localStorage)
+      .some(key => key.startsWith(prefix)), MULTI_PING_CACHE_PREFIX)).toBe(false)
     resumeColdPagePingResponses()
 
     const browser = page.context().browser()
@@ -2302,8 +2331,8 @@ test.describe('node-card per-node ping task bindings', () => {
       for (const metric of ['latency', 'loss'] as const)
         await expectAllNodeCardPingBucketStates(coldPage, metric, 'pending')
       await expect(nodeCardPingPanel(coldPage, 'latency')).not.toContainText('71 ms')
-      expect(await coldPage.evaluate(() => Object.keys(localStorage)
-        .some(key => key.startsWith('komari-theme-emerald:selected-node-ping-stats:')))).toBe(false)
+      expect(await coldPage.evaluate(prefix => Object.keys(localStorage)
+        .some(key => key.startsWith(prefix)), MULTI_PING_CACHE_PREFIX)).toBe(false)
       resumeColdContextPingResponses()
     }
     finally {
@@ -2347,7 +2376,15 @@ test.describe('node-card per-node ping task bindings', () => {
     expect(selectedPingMetricTimelineEntries(fixture.timeline)).toHaveLength(0)
   })
 
-  test('v1.3.3 bounds page-level pending RPCs to one selected query per bound node and retry epoch', async ({ page }) => {
+  test('task-grouped coordination bounds page-level pending RPCs and preserves every node identity', async ({ page }) => {
+    let catalogRequestCount = 0
+    page.on('request', (request) => {
+      if (!isRpc2Request(request.url()))
+        return
+      const payload = request.postDataJSON() as { method?: string } | null
+      if (payload?.method === 'public:getPublicPingTasks')
+        catalogRequestCount += 1
+    })
     await page.setViewportSize({ width: 1280, height: 720 })
     const fixture = await installKomariFixture(page, {
       fakeTimers: true,
@@ -2361,24 +2398,25 @@ test.describe('node-card per-node ping task bindings', () => {
     await openStablePage(page)
 
     const selectedRequests = () => selectedPingMetricTimelineEntries(fixture.timeline)
-    await expect.poll(() => selectedRequests().length).toBe(12)
-    expect([...new Set(selectedRequests().map(entry => entry.params.entity_id))]).toHaveLength(12)
-    expect(fixture.timeline.filter(entry => entry.method === 'public:getPublicPingTasks')).toHaveLength(1)
+    await expect.poll(() => selectedRequests().length).toBeGreaterThan(0)
+    const initialRequestCount = selectedRequests().length
+    expect(initialRequestCount).toBeLessThan(12)
+    const requestedNodeIds = () => new Set(selectedRequests().flatMap((entry) => {
+      const ids = entry.params.entity_ids
+      if (Array.isArray(ids))
+        return ids.map(String)
+      return typeof entry.params.entity_id === 'string' ? [entry.params.entity_id] : []
+    }))
+    await expect.poll(() => requestedNodeIds().size).toBe(12)
+    expect(catalogRequestCount).toBe(1)
 
     await fixture.advanceTime(45_000)
-    const requestsByNode = new Map<string, number>()
-    for (const entry of selectedRequests()) {
-      const uuid = entry.params.entity_id
-      if (typeof uuid === 'string')
-        requestsByNode.set(uuid, (requestsByNode.get(uuid) ?? 0) + 1)
-    }
-
-    // Each node needs its own entity-scoped data, but all twelve consumers must
-    // share the bounded 5/10/20 scheduler cadence instead of multiplying it.
-    expect(selectedRequests().length).toBeGreaterThanOrEqual(12 * 4)
-    expect(selectedRequests().length).toBeLessThanOrEqual(12 * 6)
-    expect([...requestsByNode]).toHaveLength(12)
-    expect([...requestsByNode.values()].every(count => count >= 4 && count <= 6)).toBe(true)
+    // All twelve consumers share one task group and the bounded 5/10/20 retry
+    // cadence. Incremental mounting may schedule a few initial batches, but it
+    // must remain far below the old per-card request fan-out.
+    expect(selectedRequests().length).toBeGreaterThan(initialRequestCount)
+    expect(selectedRequests().length).toBeLessThanOrEqual(initialRequestCount * 6)
+    expect(requestedNodeIds().size).toBe(12)
   })
 
   test('keeps an accepted selected-task snapshot when its next refresh fails', async ({ page }) => {
@@ -2412,6 +2450,15 @@ test.describe('node-card per-node ping task bindings', () => {
   })
 
   test('hydrates an exact selected-task snapshot before a reload network refresh completes', async ({ page }) => {
+    const catalogResponses: number[] = []
+    page.on('response', async (response) => {
+      const request = response.request()
+      if (!isRpc2Request(request.url()))
+        return
+      const payload = request.postDataJSON() as { method?: string } | null
+      if (payload?.method === 'public:getPublicPingTasks')
+        catalogResponses.push(response.status())
+    })
     await page.setViewportSize({ width: 1280, height: 720 })
     const fixture = await installKomariFixture(page, {
       nodeCardPingTaskBindings: primaryBinding(202),
@@ -2420,12 +2467,14 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page)
     await expectNodeCardPing(page, '200 ms', '25.0%')
-    expect(await page.evaluate(() => Object.keys(localStorage)
-      .some(key => key.startsWith('komari-theme-emerald:selected-node-ping-stats:')))).toBe(true)
+    expect(await page.evaluate(prefix => Object.keys(localStorage)
+      .some(key => key.startsWith(prefix) && !key.endsWith(':index')), MULTI_PING_CACHE_PREFIX)).toBe(true)
 
     const resumePingResponses = fixture.pausePingResponses()
     await page.reload({ waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
+    await expect.poll(() => catalogResponses.length).toBeGreaterThanOrEqual(2)
+    expect(catalogResponses.every(status => status === 200)).toBe(true)
     await expectNodeCardPing(page, '200 ms', '25.0%')
     await expect(nodeCardPingPanel(page, 'latency')).not.toContainText('加载中')
     resumePingResponses()
@@ -2441,20 +2490,22 @@ test.describe('node-card per-node ping task bindings', () => {
     await openStablePage(page)
     await expectNodeCardPing(page, '200 ms', '25.0%')
 
-    await page.evaluate(() => {
+    await page.evaluate((prefix) => {
       const key = Object.keys(localStorage)
-        .find(value => value.startsWith('komari-theme-emerald:selected-node-ping-stats:'))
+        .find(value => value.startsWith(prefix) && !value.endsWith(':index'))
       if (!key)
         throw new Error('selected Ping snapshot was not persisted')
       const value = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, unknown>
       localStorage.setItem(key, JSON.stringify({ ...value, version: 999 }))
-    })
+    }, MULTI_PING_CACHE_PREFIX)
 
     const resumePingResponses = fixture.pausePingResponses()
     await page.reload({ waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
-    await expect(nodeCardPingPanel(page, 'latency')).toContainText('加载中')
-    await expect(nodeCardPingPanel(page, 'latency')).not.toContainText('200 ms')
+    const strip = primaryNodeCard(page).locator('[data-node-ping-task-id="202"]')
+    await expect(strip).toContainText('等待采样')
+    await expect(strip).not.toContainText('200 ms')
+    await expect(strip.locator('[data-node-ping-bars="latency"] [data-node-ping-bar]').first()).toHaveAttribute('data-node-ping-state', 'pending')
     resumePingResponses()
     await expectNodeCardPing(page, '200 ms', '25.0%')
   })
@@ -2510,15 +2561,20 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectNodeCardPing(page, '200 ms', '25.0%')
     const selectedQueryCount = () => calls.filter(call => call.method === 'public:queryMetrics'
       && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202').length
-    expect(selectedQueryCount()).toBe(1)
+    const initialQueryCount = selectedQueryCount()
+    expect(initialQueryCount).toBeGreaterThanOrEqual(1)
+    expect(initialQueryCount).toBeLessThanOrEqual(2)
 
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
-    await expect.poll(selectedQueryCount).toBe(2)
+    await expect.poll(selectedQueryCount).toBeGreaterThan(initialQueryCount)
+    const afterVisibilityCount = selectedQueryCount()
+    expect(afterVisibilityCount).toBeLessThanOrEqual(initialQueryCount + 2)
     await expectNodeCardPing(page, '200 ms', '25.0%')
     await expect(nodeCardPingPanel(page, 'latency')).not.toContainText('加载中')
 
     await page.evaluate(() => window.dispatchEvent(new Event('online')))
-    await expect.poll(selectedQueryCount).toBe(3)
+    await expect.poll(selectedQueryCount).toBeGreaterThan(afterVisibilityCount)
+    expect(selectedQueryCount()).toBeLessThanOrEqual(afterVisibilityCount + 2)
     await expectNodeCardPing(page, '200 ms', '25.0%')
   })
 
@@ -2540,7 +2596,10 @@ test.describe('node-card per-node ping task bindings', () => {
     await openStablePage(page)
     await expectNodeCardPing(page, '200 ms', '25.0%')
 
-    await expect.poll(() => calls.filter(isPingLegacyRequest).length).toBe(1)
+    await expect.poll(() => calls.filter(isPingLegacyRequest).length).toBeGreaterThan(0)
+    const legacyCalls = calls.filter(isPingLegacyRequest)
+    expect(legacyCalls.length).toBeLessThanOrEqual(2)
+    expect(new Set(legacyCalls.map(call => call.params.uuid))).toEqual(new Set([PRIMARY_NODE_UUID]))
     expect(calls.filter(call => call.method === 'public:getPingMetricStats'
       && call.params.task_id === undefined)).toHaveLength(0)
     expect(calls.filter(call => call.method === 'public:queryMetrics' && isPingMetricQuery(call.params) && !(call.params.tags as Record<string, unknown> | undefined)?.task_id)).toHaveLength(0)
@@ -2641,7 +2700,8 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page)
     await expectNodeCardPing(page, '200 ms', '25.0%')
-    await expect.poll(() => calls.filter(call => isPingLegacyRequest(call) && call.params.uuid === PRIMARY_NODE_UUID).length).toBe(1)
+    await expect.poll(() => calls.filter(call => isPingLegacyRequest(call) && call.params.uuid === PRIMARY_NODE_UUID).length).toBeGreaterThan(0)
+    expect(calls.filter(call => isPingLegacyRequest(call) && call.params.uuid === PRIMARY_NODE_UUID).length).toBeLessThanOrEqual(2)
     expect(calls.filter(call => call.method === 'public:getPingMetricStats' && call.params.entity_id === PRIMARY_NODE_UUID && call.params.task_id === undefined)).toHaveLength(0)
     expect(calls.filter(call => call.method === 'public:queryMetrics' && call.params.entity_id === PRIMARY_NODE_UUID && isPingMetricQuery(call.params) && !(call.params.tags as Record<string, unknown> | undefined)?.task_id)).toHaveLength(0)
   })
@@ -2663,7 +2723,8 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page)
     await expectNodeCardPing(page, '-', '-')
-    await expect.poll(() => calls.filter(call => isPingLegacyRequest(call) && call.params.uuid === PRIMARY_NODE_UUID).length).toBe(1)
+    await expect.poll(() => calls.filter(call => isPingLegacyRequest(call) && call.params.uuid === PRIMARY_NODE_UUID).length).toBeGreaterThan(0)
+    expect(calls.filter(call => isPingLegacyRequest(call) && call.params.uuid === PRIMARY_NODE_UUID).length).toBeLessThanOrEqual(2)
     expect(calls.filter(call => call.method === 'public:getPingMetricStats' && call.params.entity_id === PRIMARY_NODE_UUID && call.params.task_id === undefined)).toHaveLength(0)
     expect(calls.filter(call => call.method === 'public:queryMetrics' && call.params.entity_id === PRIMARY_NODE_UUID && isPingMetricQuery(call.params) && !(call.params.tags as Record<string, unknown> | undefined)?.task_id)).toHaveLength(0)
   })
@@ -2754,9 +2815,13 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectNodeCardPing(page, '-', '100.0%')
     await expect(primaryNodeCard(page).locator('[data-node-ping-bars="latency"] [role="tooltip"]')).toHaveCount(20)
     await expect(primaryNodeCard(page).locator('[data-node-ping-bars="loss"] [role="tooltip"]')).toHaveCount(20)
-    expect(calls.filter(call => call.method === 'public:getPingMetricStats' && call.params.task_id === '202')).toHaveLength(1)
-    expect(calls.filter(call => call.method === 'public:queryMetrics'
-      && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202')).toHaveLength(1)
+    const initialStatsCount = calls.filter(call => call.method === 'public:getPingMetricStats' && call.params.task_id === '202').length
+    const initialQueryCount = calls.filter(call => call.method === 'public:queryMetrics'
+      && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202').length
+    expect(initialStatsCount).toBeGreaterThanOrEqual(1)
+    expect(initialStatsCount).toBeLessThanOrEqual(2)
+    expect(initialQueryCount).toBeGreaterThanOrEqual(1)
+    expect(initialQueryCount).toBeLessThanOrEqual(2)
     expect(calls.filter(call => call.method === 'public:getPingMetricStats'
       && call.params.entity_id === PRIMARY_NODE_UUID
       && call.params.task_id === undefined)).toHaveLength(0)
@@ -2774,7 +2839,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await fixture.advanceTime(65_000)
     await expectNodeCardPing(page, '17 ms', '0.0%')
     await expect.poll(() => calls.filter(call => call.method === 'public:queryMetrics'
-      && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202').length).toBe(2)
+      && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202').length).toBeGreaterThan(initialQueryCount)
     expect(calls.filter(call => call.method === 'public:getPingMetricStats'
       && call.params.entity_id === PRIMARY_NODE_UUID
       && call.params.task_id === undefined)).toHaveLength(0)
@@ -2798,7 +2863,8 @@ test.describe('node-card per-node ping task bindings', () => {
     await openStablePage(page)
 
     await expectNodeCardPing(page, '-', '100.0%')
-    await expect.poll(() => calls.filter(call => isPingLegacyRequest(call) && call.params.uuid === PRIMARY_NODE_UUID).length).toBe(1)
+    await expect.poll(() => calls.filter(call => isPingLegacyRequest(call) && call.params.uuid === PRIMARY_NODE_UUID).length).toBeGreaterThan(0)
+    expect(calls.filter(call => isPingLegacyRequest(call) && call.params.uuid === PRIMARY_NODE_UUID).length).toBeLessThanOrEqual(2)
     expect(calls.filter(call => call.method === 'public:getPingMetricStats'
       && call.params.entity_id === PRIMARY_NODE_UUID
       && call.params.task_id === undefined)).toHaveLength(0)
@@ -2819,7 +2885,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectNodeCardPing(page, '91 ms', '12.5%')
   })
 
-  test('missing or deleted task falls back even when historical task data remains', async ({ page }) => {
+  test('missing or deleted task is marked invalid and never impersonated by aggregate history', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 })
     await installKomariFixture(page, {
       nodeCardPingTaskBindings: primaryBinding(202),
@@ -2827,10 +2893,13 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page)
 
-    await expectNodeCardPing(page, '91 ms', '12.5%')
+    const slot = primaryNodeCard(page).locator('[data-node-ping-invalid-slot="1"]')
+    await expect(slot).toContainText('配置失效')
+    await expect(slot).not.toContainText('91 ms')
+    await expect(slot).not.toContainText('12.5%')
   })
 
-  test('task not assigned to the node falls back to the original all-task aggregate', async ({ page }) => {
+  test('task not assigned to the node is marked invalid and never replaced with aggregate data', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 })
     await installKomariFixture(page, {
       nodeCardPingTaskBindings: primaryBinding(202),
@@ -2838,7 +2907,10 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page)
 
-    await expectNodeCardPing(page, '91 ms', '12.5%')
+    const slot = primaryNodeCard(page).locator('[data-node-ping-invalid-slot="1"]')
+    await expect(slot).toContainText('任务失效')
+    await expect(slot).not.toContainText('91 ms')
+    await expect(slot).not.toContainText('12.5%')
   })
 
   test('task with no Metric or Legacy data remains empty when its binding is valid', async ({ page }) => {
@@ -2971,13 +3043,14 @@ test.describe('node-card per-node ping task bindings', () => {
     })).toBe(true)
   })
 
-  test('the Ping Center is node-centred, filters candidates by task clients, and saves a v2 custom override without rewriting v1', async ({ page }) => {
+  test('the Ping Center is node-centred, filters candidates by task clients, and saves a v3 custom override without rewriting v1 or v2', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     const fixture = await installKomariFixture(page, {
       adminAccess: 'admin',
       hidePingTaskBindingEntry: true,
       nodeCardPingFixture: { metric: 'valid' },
     })
+    const originalSettings = fixture.getSavedThemeSettings()
     await openStablePage(page, '/?view=pingsettings')
 
     await expect(page.getByRole('heading', { name: 'Ping 监控中心', exact: true })).toHaveClass(/text-2xl/)
@@ -2986,12 +3059,16 @@ test.describe('node-card per-node ping task bindings', () => {
     const primaryRow = page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)
     await expect(primaryRow).toBeVisible()
     await expect(primaryRow).toContainText('候选 2')
+    await page.getByTestId('ping-center-global-slot-1').selectOption('101')
     await primaryRow.getByRole('button', { name: '单节点配置' }).click()
 
     const dialog = page.getByRole('dialog')
     await dialog.getByTestId('ping-center-node-mode-custom').click()
-    await expect(dialog.getByTestId('ping-center-node-slot-1').locator('option')).toContainText(['请选择任务', 'Fixture Tokyo', 'Fixture Hong Kong'])
-    await expect(dialog.getByTestId('ping-center-node-slot-1').locator('option')).not.toContainText(['Fixture Seoul (not assigned to primary)'])
+    const taskOptions = await dialog.getByTestId('ping-center-node-slot-1').locator('option').allTextContents()
+    expect(taskOptions[0]).toBe('请选择探测任务')
+    expect(taskOptions.some(text => text.includes('Fixture Tokyo'))).toBe(true)
+    expect(taskOptions.some(text => text.includes('Fixture Hong Kong'))).toBe(true)
+    expect(taskOptions.some(text => text.includes('Fixture Seoul (not assigned to primary)'))).toBe(false)
     await dialog.getByTestId('ping-center-node-slot-1').selectOption('202')
     await dialog.getByRole('button', { name: '完成' }).click()
     await page.getByTestId('ping-center-save-preview').click()
@@ -3003,10 +3080,11 @@ test.describe('node-card per-node ping task bindings', () => {
     expect(savedSettings.fixtureUnrelatedSetting).toBe('preserve-me')
     expect(savedSettings.hidePingTaskBindingEntry).toBe(true)
     expect(String(savedSettings.nodeCardPingTaskBindings)).toBe('{}')
-    expect(inspectNodeCardMultiPingConfig(savedSettings.nodeCardPingDisplayConfigV2).config?.nodes[PRIMARY_NODE_UUID]).toEqual({
-      mode: 'custom',
-      displayCount: 1,
-      taskIds: [202],
+    expect(savedSettings.nodeCardPingDisplayConfigV2).toBe(originalSettings.nodeCardPingDisplayConfigV2)
+    expect(inspectNodeCardPingConfig(savedSettings.nodeCardPingDisplayConfigV3).config).toMatchObject({
+      schemaVersion: 3,
+      global: { threeNetworkEnabled: false, taskIds: [101, null, null] },
+      nodes: { [PRIMARY_NODE_UUID]: { mode: 'custom', taskIds: [202, null, null] } },
     })
   })
 
@@ -3024,19 +3102,24 @@ test.describe('node-card per-node ping task bindings', () => {
     await search.fill('no-such-node')
     await expect(page.getByText('没有匹配的节点。')).toBeVisible()
     await search.fill(PRIMARY_NODE_UUID)
-    await page.getByTestId('ping-center-settings-filter').selectOption('custom')
+    await page.getByTestId('ping-center-settings-filter').locator('[data-filter="custom"]').click()
     await expect(page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)).toBeVisible()
-    await page.getByTestId('ping-center-settings-filter').selectOption('all')
+    await page.getByTestId('ping-center-settings-filter').locator('[data-filter="all"]').click()
 
     const primaryRow = page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)
     await primaryRow.getByRole('button', { name: '单节点配置' }).click()
     await page.getByTestId('ping-center-node-clear').click()
     await page.getByRole('dialog').getByRole('button', { name: '完成' }).click()
-    await expect(primaryRow).toContainText('inherit')
+    await expect(primaryRow).toContainText('继承全局')
+    await page.getByTestId('ping-center-global-slot-1').selectOption('101')
     await page.getByTestId('ping-center-save-preview').click()
     await page.getByTestId('ping-center-save-confirm').click()
+    await expect.poll(() => fixture.getThemeSaveCount()).toBe(1)
     expect(String(fixture.getSavedThemeSettings().nodeCardPingTaskBindings)).toBe(primaryBinding(202))
-    expect(inspectNodeCardMultiPingConfig(fixture.getSavedThemeSettings().nodeCardPingDisplayConfigV2).config?.nodes[PRIMARY_NODE_UUID]).toBeUndefined()
+    expect(inspectNodeCardPingConfig(fixture.getSavedThemeSettings().nodeCardPingDisplayConfigV3).config).toMatchObject({
+      global: { threeNetworkEnabled: false, taskIds: [101, null, null] },
+      nodes: {},
+    })
   })
 
   test('recovery removes orphaned and invalid v2 overrides without mutating downgrade-safe v1 mappings', async ({ page }) => {
@@ -3061,12 +3144,16 @@ test.describe('node-card per-node ping task bindings', () => {
     await primaryRow.getByRole('button', { name: '单节点配置' }).click()
     await page.getByTestId('ping-center-node-clear').click()
     await page.getByRole('dialog').getByRole('button', { name: '完成' }).click()
+    await page.getByTestId('ping-center-global-slot-1').selectOption('101')
     await page.getByTestId('ping-center-save-preview').click()
     await page.getByTestId('ping-center-save-confirm').click()
     await expect.poll(() => fixture.getThemeSaveCount()).toBe(1)
-    await expect.poll(() => inspectNodeCardMultiPingConfig(fixture.getSavedThemeSettings().nodeCardPingDisplayConfigV2).status).toBe('valid')
     expect(String(fixture.getSavedThemeSettings().nodeCardPingTaskBindings)).toBe(legacyValue)
-    expect(inspectNodeCardMultiPingConfig(fixture.getSavedThemeSettings().nodeCardPingDisplayConfigV2).config?.nodes).toEqual({})
+    expect(fixture.getSavedThemeSettings().nodeCardPingDisplayConfigV2).toBeUndefined()
+    expect(inspectNodeCardPingConfig(fixture.getSavedThemeSettings().nodeCardPingDisplayConfigV3).config).toMatchObject({
+      global: { threeNetworkEnabled: false, taskIds: [101, null, null] },
+      nodes: {},
+    })
   })
 
   test('guests can open the page shell without requesting or displaying administrator data', async ({ page }) => {

@@ -2,6 +2,26 @@
 
 本文件只记录 **Glassmorphism Plus** 自己的发行版本。原始 Glassmorphism 的版本历史请查看[上游仓库](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases)；Plus 的选择性同步记录见 [UPSTREAM.md](UPSTREAM.md)。
 
+## [2.1.0] - 2026-09-02
+
+### Changed
+
+- 首页 Ping 显示由 1／2／3 项选择收敛为单任务与三网监控两种全局模式；关闭三网仅隐藏任务 2／3，不删除既有任务 ID。
+- Ping 监控中心统一为简体中文，主筛选精简为全部、继承全局、单独配置和需要处理，并支持点击覆盖状态进行精确筛选。
+- 重新排列全局任务配置、单节点配置和批量工具栏，保留搜索组合、跨筛选选择、未保存修改提醒与并发保存合并。
+- NodeCard Ping 区域改为固定任务条，明确标示延迟和丢包双 20 格轨道；单任务及三网模式在 mini、compact、comfortable、large 与移动端保持稳定高度。
+
+### Compatibility and correctness
+
+- 新增不透明的 `nodeCardPingDisplayConfigV3`；v2.0 `displayCount=1/3` 分别迁移为单任务／三网模式，`displayCount=2` 保留前两项并把第三项明确留空，不自动猜测任务。
+- v1／v2 设置原值继续保留，v3 迁移与序列化保持幂等；保存时只合并 v3 key，并在写入后重新读取验证。
+- 正常任务不再重复显示“有效数据”；等待采样、暂无采样、更新失败、任务失效、未配置与 100% 丢包保持同一几何结构和严格 node／task identity。
+- 任务目录按需预取，既有 task-grouped 查询、精确 pair fallback、缓存与调度管线保持不变；卡片尺寸和配置筛选切换不增加 Ping 请求。
+
+### Credits
+
+- 三任务信息层级和管理流程参考了 Komari-Theme-LuminaPlus 的公开行为；实现仍为 Glassmorphism Plus 架构内的 clean-room reimplementation，详见 [CREDITS.md](CREDITS.md)。
+
 ## [2.0.0] - 2026-09-02
 
 ### Added
@@ -88,6 +108,7 @@
 
 Git tags `1.0`、`1.1` 与 `1.2` 指向同一历史 commit。现有证据不足以为这三个 tag 分别重建独立、可靠的变更列表，因此这里只保留历史事实，不推测具体修复内容。
 
+[2.1.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v1.4.0...v2.0.0
 [1.4.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v1.3.6...v1.4.0
 [1.3.6]: https://github.com/helloworld-mars/Glassmorphism-Plus/releases/tag/v1.3.6

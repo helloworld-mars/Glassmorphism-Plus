@@ -14,9 +14,9 @@ Glassmorphism Plus is an independently maintained derivative. Its Plus-specific 
 
 The original project's visual foundation and inherited implementation remain attributed to sanrokamlan. Selective upstream synchronization is documented in [UPSTREAM.md](UPSTREAM.md).
 
-## v2.0.0 clean-room behavior reference
+## v2.0.0-v2.1.0 clean-room behavior reference
 
-Multi-Ping configuration and loading behavior were informed by implementation ideas from [Komari-Theme-LuminaPlus](https://github.com/shanyang242/Komari-Theme-LuminaPlus) by [shanyang242](https://github.com/shanyang242).
+Multi-Ping configuration, fixed three-task information hierarchy and management workflow were informed by implementation ideas from [Komari-Theme-LuminaPlus](https://github.com/shanyang242/Komari-Theme-LuminaPlus) by [shanyang242](https://github.com/shanyang242).
 
 The reviewed public LuminaPlus release did not include an explicit LICENSE file or other repository license terms. Glassmorphism Plus therefore used behavior study plus clean-room reimplementation: no LuminaPlus source code, React UI, CSS, assets, metadata, branding, build output or Git history was copied into this project. LuminaPlus is a design reference, not the upstream of Glassmorphism Plus.
 

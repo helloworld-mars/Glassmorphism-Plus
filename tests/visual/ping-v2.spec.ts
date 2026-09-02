@@ -15,6 +15,10 @@ import {
   resolveNodeCardMultiPingRuntimeConfig,
   serializeNodeCardMultiPingConfig,
 } from '../../src/utils/nodeCardMultiPingConfig'
+import {
+  inspectNodeCardPingConfig,
+  serializeNodeCardPingConfig,
+} from '../../src/utils/nodeCardPingConfig'
 import { installKomariFixture, PRIMARY_NODE_UUID } from './fixtures/komari'
 
 const NODE_2 = '00000000-0000-4000-8000-000000000002'
@@ -902,7 +906,7 @@ function primaryCard(page: import('@playwright/test').Page) {
 
 test.describe('multi-Ping node-card geometry and route persistence', () => {
   for (const size of CARD_SIZES) {
-    for (const taskCount of [1, 2, 3] as const) {
+    for (const taskCount of [1, 3] as const) {
       test(`${size} card contains ${taskCount} exact Ping task strip${taskCount > 1 ? 's' : ''} without overflow`, async ({ page }) => {
         const encoded = serializeNodeCardMultiPingConfig(config({
           global: { displayCount: taskCount, taskIds: SHARED_TASK_IDS.slice(0, taskCount) },
@@ -1010,6 +1014,25 @@ test.describe('multi-Ping node-card geometry and route persistence', () => {
       })
     }
   }
+
+  test('a v2 two-task configuration migrates to three fixed rows with an explicit empty third task', async ({ page }) => {
+    await installKomariFixture(page, {
+      hideEarth: true,
+      nodeCardSize: 'compact',
+      nodeCount: 3,
+      nodeCardPingDisplayConfigV2: serializeNodeCardMultiPingConfig(config({
+        global: { displayCount: 2, taskIds: SHARED_TASK_IDS.slice(0, 2) },
+      })),
+      nodeCardPingFixture: { metric: 'valid', legacy: 'valid', thirdSharedTask: true },
+    })
+    await page.goto('/')
+    const group = primaryCard(page).locator('[data-node-ping-mode="multi"]')
+    await expect(group).toHaveAttribute('data-node-ping-display-count', '3')
+    await expect(group).toHaveAttribute('data-node-ping-task-count', '2')
+    await expect(group).toHaveAttribute('data-node-ping-coverage', 'partial')
+    await expect(group.locator('[data-node-ping-task-id]')).toHaveCount(2)
+    await expect(group.locator('[data-node-ping-invalid-slot="3"]')).toContainText('未配置')
+  })
 })
 
 test.describe('v2 multi-Ping visual baselines', () => {
@@ -1136,12 +1159,13 @@ test.describe('Ping center route, access, and hidden-entry contracts', () => {
     const fixture = await installKomariFixture(page, {
       adminAccess: 'admin',
       nodeCardPingDisplayConfigV2: serializeNodeCardMultiPingConfig(config()),
-      nodeCardPingFixture: { metric: 'valid' },
+      nodeCardPingFixture: { metric: 'valid', thirdSharedTask: true },
     })
     await page.goto('/?view=pingsettings&pingtab=config')
     await expect(page.getByTestId('ping-center-global-config')).toBeVisible()
-    await page.getByTestId('ping-center-global-count').selectOption('2')
+    await page.getByTestId('ping-center-three-network-switch').click()
     await page.getByTestId('ping-center-global-slot-2').selectOption('202')
+    await page.getByTestId('ping-center-global-slot-3').selectOption('303')
     await page.getByTestId('ping-center-save-preview').click()
     await expect(page.getByTestId('ping-center-save-dialog')).toBeVisible()
 
@@ -1150,6 +1174,7 @@ test.describe('Ping center route, access, and hidden-entry contracts', () => {
     await page.getByTestId('ping-center-save-confirm').click()
     await freshAdminRequest
     await page.getByTestId('ping-center-tab-overview').evaluate((element: HTMLElement) => element.click())
+    await page.getByTestId('ping-center-leave-discard').click()
     fixture.setAdminAccess('guest')
     releaseAdmin()
 
@@ -1164,12 +1189,12 @@ test.describe('Ping center route, access, and hidden-entry contracts', () => {
     fixture.setAdminAccess('admin')
     await page.reload()
     await expect(page.getByTestId('ping-center-global-config')).toBeVisible()
-    await expect(page.getByTestId('ping-center-global-count')).toHaveValue('1')
+    await expect(page.getByTestId('ping-center-three-network-switch')).toHaveAttribute('aria-checked', 'false')
     expect(adminPingRequests).toBeGreaterThan(requestsBeforeRelogin)
     expect(fixture.getThemeSaveCount()).toBe(0)
   })
 
-  test('save refetches and merges fresh settings, preserves legacy bytes, verifies v2, and clears an orphan override', async ({ page }) => {
+  test('save refetches and merges fresh settings, preserves v1/v2 bytes, verifies v3, and clears an orphan override', async ({ page }) => {
     const legacyBytes = `{ "${PRIMARY_NODE_UUID}" : 202 }`
     const orphanUuid = '00000000-0000-4000-8000-000000000099'
     const initialV2 = serializeNodeCardMultiPingConfig(config({
@@ -1197,10 +1222,11 @@ test.describe('Ping center route, access, and hidden-entry contracts', () => {
 
     const saved = fixture.getSavedThemeSettings()
     expect(saved.nodeCardPingTaskBindings).toBe(legacyBytes)
+    expect(saved.nodeCardPingDisplayConfigV2).toBe(initialV2)
     expect(saved.concurrentUnrelated).toEqual({ revision: 2, owner: 'other-writer' })
-    const savedInspection = inspectNodeCardMultiPingConfig(saved.nodeCardPingDisplayConfigV2)
+    const savedInspection = inspectNodeCardPingConfig(saved.nodeCardPingDisplayConfigV3)
     expect(savedInspection).toMatchObject({ status: 'valid' })
     expect(savedInspection.config?.nodes[orphanUuid]).toBeUndefined()
-    expect(serializeNodeCardMultiPingConfig(savedInspection.config!)).toBe(saved.nodeCardPingDisplayConfigV2)
+    expect(serializeNodeCardPingConfig(savedInspection.config!)).toBe(saved.nodeCardPingDisplayConfigV3)
   })
 })

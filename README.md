@@ -35,16 +35,16 @@
 
 | 项目               | 当前状态                                                                                                               |
 | :----------------- | :--------------------------------------------------------------------------------------------------------------------- |
-| 当前 Plus 版本     | **v2.0.0**                                                                                                             |
+| 当前 Plus 版本     | **v2.1.0**                                                                                                             |
 | 上游同步基线       | [sanrokamlan Glassmorphism v3.3.7](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases/tag/v3.3.7) |
 | 当前维护者         | [helloworld-mars](https://github.com/helloworld-mars)                                                                  |
 | 适用平台           | [Komari Monitor](https://github.com/komari-monitor/komari)                                                             |
 | 已验证 Komari 版本 | **1.4.3**                                                                                                              |
 | 技术栈             | Vue 3、TypeScript、Vite 7、Tailwind CSS 4、Pinia、ECharts、Bun                                                         |
-| 源码发布           | GitHub `main` 与 `v2.0.0` Release；Release 不附加客户安装包                                                            |
+| 源码发布           | GitHub `main` 与 `v2.1.0` Release；Release 不附加客户安装包                                                            |
 | 本地安装包         | `<version>/Glassmorphism-Plus-release-<version>.zip`                                                                   |
 
-Glassmorphism Plus 是独立维护的衍生主题。v2.0.0 是现有 Plus 的重大升级，不是新主题或新仓库；上游 v3.3.7 是同步基线，不是 Plus 的当前版本。同步来源、取舍和署名详见 [UPSTREAM.md](UPSTREAM.md)。
+Glassmorphism Plus 是独立维护的衍生主题。v2.1.0 延续现有 Plus，并把首页 Ping 展示收敛为单任务或三网监控两种模式；上游 v3.3.7 是同步基线，不是 Plus 的当前版本。同步来源、取舍和署名详见 [UPSTREAM.md](UPSTREAM.md)。
 
 ---
 
@@ -52,8 +52,8 @@ Glassmorphism Plus 是独立维护的衍生主题。v2.0.0 是现有 Plus 的重
 
 在保留原始 Glassmorphism 视觉基础的同时，Plus 重点维护以下能力：
 
-- 以节点 UUID 为中心，为首页卡片显示 1、2 或 3 个真实分配的 Ping task；统一 Ping Center 位于 `pingsettings`。
-- 支持全局 1／2／3 任务默认值、每服务器 inherit／custom override，以及严格任务交集下的多服务器批量配置。
+- 以节点 UUID 为中心，为首页卡片显示单个任务或固定三行的三网任务；统一 Ping 监控中心位于 `pingsettings`。
+- 支持全局三网监控开关、每服务器继承全局／单独配置，以及严格任务交集下的多服务器批量配置。
 - 任务目录、配置解析、分组查询、精确 pair fallback、缓存与共享刷新器组成同一数据管线；单任务失败不会阻塞其他任务。
 - 指定任务的 Metric 与同任务 Legacy 保持严格的节点／任务归属验证；有效 selected task 不会被 aggregate 数据冒充。
 - Ping 支持 1 小时至 30 天及自定义范围，并为长范围采用多层历史覆盖。
@@ -78,8 +78,10 @@ Glassmorphism Plus 是独立维护的衍生主题。v2.0.0 是现有 Plus 的重
 
 ### Ping 与丢包
 
-- 每张首页节点卡可显示 1／2／3 个任务；候选任务必须真实包含该节点 UUID，重复或失效 task 会被明确拦截或标记。
-- 全局默认、单服务器 override 和批量配置均由统一 Ping Center 管理；批量候选取所选服务器的严格 task 交集。
+- 每张首页节点卡只采用单任务或三网监控模式；三网模式始终保留三行几何结构，未覆盖或失效任务不会被折叠。
+- 候选任务必须真实包含该节点 UUID，重复、未分配或失效任务会被明确拦截或标记，不会由聚合结果冒充。
+- 全局默认、单服务器单独配置和批量配置均由统一 Ping 监控中心管理；批量候选取所选服务器的严格 task 交集。
+- 每个任务条明确标示延迟与丢包，并各保留 20 个时间桶；正常状态不重复显示状态文案，等待、缺失、失败和 100% 丢包采用固定高度呈现。
 - 延迟、丢包与趋势条来自同一节点／任务 pair；Metric 批量查询不支持时才降级为精确 pair 请求，同任务 Legacy 是最后的数据 fallback。
 - 共享 Promise、内存／持久快照和单一 sample-aware scheduler 提供快速 Warm Start，同时在 hidden／offline／unmount 时暂停或清理。
 - 1 小时、6 小时、12 小时、1 天、7 天、14 天、30 天与自定义范围。
@@ -120,9 +122,10 @@ Glassmorphism Plus 是独立维护的衍生主题。v2.0.0 是现有 Plus 的重
 ### 主题配置
 
 - Komari managed theme 配置，无需修改源码即可调整布局、卡片、图表、背景和隐私选项。
-- `pingsettings` Ping Center 提供公开概览及管理员设置页，不要求手写任务 ID。
-- v2 配置使用不透明、版本化的 `nodeCardPingDisplayConfigV2`，记录全局任务数／顺序与节点 inherit／custom override；保存前会重新读取最新 settings 并只 merge 本功能 key。
-- 旧 `nodeCardPingTaskBindings` 单任务映射会自动迁移为等价的一任务显示并原样保留，升级不要求重新配置，也保留降级读取能力。
+- `pingsettings` Ping 监控中心提供公开概览及管理员设置页，采用简体中文主筛选、可点击覆盖状态、紧凑节点列表和批量操作，不要求手写任务 ID。
+- v3 配置使用不透明、版本化的 `nodeCardPingDisplayConfigV3`，记录全局三网模式、三个任务槽与节点单独配置；保存前会重新读取最新 settings，并只合并本功能 key。
+- v2.0 的 `displayCount=1` 迁移为单任务模式，`displayCount=3` 迁移为三网模式，`displayCount=2` 迁移为保留前两项且第三项留空的待补全三网模式；迁移不会猜测或删除任务。
+- 旧 `nodeCardPingTaskBindings` 与 `nodeCardPingDisplayConfigV2` 原值均会保留，升级不要求重新配置，也保留降级读取能力；关闭三网监控只隐藏任务 2／3，不删除其 ID。
 
 ---
 
@@ -132,7 +135,7 @@ Glassmorphism Plus 是独立维护的衍生主题。v2.0.0 是现有 Plus 的重
 
 ### 重要说明
 
-- **v2.0.0 GitHub Release 的 installer asset 数量为 0。** 客户安装 ZIP 只在本地生成和验证，不上传 GitHub Release。
+- **v2.1.0 GitHub Release 的 installer asset 数量为 0。** 客户安装 ZIP 只在本地生成和验证，不上传 GitHub Release。
 - GitHub 自动生成的 **Source code (zip)** 是源码快照，**不是** Komari 可安装主题包。
 - Komari 的远程仓库导入流程需要可用的 Release installer asset；因此本版不要把仓库 URL 当作可直接导入的安装地址。
 
@@ -213,12 +216,13 @@ bun run release:prepare
 
 ## 📝 版本历史
 
-v2.0.0 的用户可见重点：
+v2.1.0 的用户可见重点：
 
-- 首页每张节点卡可按全局默认或服务器 override 显示 1／2／3 个有效 Ping 任务，并覆盖 mini／compact／comfortable／large 四种尺寸。
-- 新 Ping Center 复用现有心跳入口，提供访客只读概览、管理员全局／单服务器／批量配置，以及兼容 direct route 的权限边界。
-- 共享任务分组、受限批量请求、精确 pair fallback、缓存与单一 scheduler 改善 Cold／Warm Start，并隔离慢任务、失败与 stale response。
-- v1.x 单任务设置自动迁移且原 key 保留；`0 ms`、`0%`、`100% loss`、PENDING、CONFIRMED_MISSING 与 late backfill 语义不变。
+- 首页 Ping 显示收敛为单任务／三网监控两种全局模式；关闭三网不会删除任务 2／3，重新开启即可恢复。
+- v2.0 的 1／2／3 项设置安全迁移到 v3；两任务配置保留原两项、第三项明确留空，v1／v2 原值继续保留。
+- Ping 监控中心统一简体中文，使用“全部／继承全局／单独配置／需要处理”主筛选、可点击覆盖状态和紧凑批量工作流。
+- NodeCard Ping 任务条明确区分延迟与丢包双 20 格轨道，并在 mini／compact／comfortable／large、移动端及亮暗模式下保持固定布局。
+- `0 ms`、`0%`、`100% loss`、等待采样、暂无采样、更新失败、任务失效与迟到回填继续保持严格的同节点／同任务数据语义。
 
 完整 Plus 历史见 [CHANGELOG.md](CHANGELOG.md)。上游来源与选择性同步记录见 [UPSTREAM.md](UPSTREAM.md)。GitHub 发布记录见 [Releases](https://github.com/helloworld-mars/Glassmorphism-Plus/releases)。
 

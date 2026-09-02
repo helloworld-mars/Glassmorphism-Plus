@@ -20,6 +20,7 @@ export interface UseNodeMultiPingStatsOptions {
   bucketCount?: MaybeRefOrGetter<number | undefined>
   batchChunkSize?: MaybeRefOrGetter<number | undefined>
   enabled?: MaybeRefOrGetter<boolean>
+  retainSnapshotWhenDisabled?: MaybeRefOrGetter<boolean>
 }
 
 /**
@@ -45,6 +46,9 @@ export function useNodeMultiPingStats(
     }))
     return {
       enabled: options.enabled === undefined ? true : Boolean(toValue(options.enabled)),
+      retainSnapshotWhenDisabled: options.retainSnapshotWhenDisabled === undefined
+        ? false
+        : Boolean(toValue(options.retainSnapshotWhenDisabled)),
       pairs,
       window: {
         hours: options.hours === undefined ? 1 : toValue(options.hours),
@@ -62,9 +66,13 @@ export function useNodeMultiPingStats(
     (value, _, onCleanup) => {
       activeSubscription?.release()
       activeSubscription = null
-      snapshots.value = []
-      if (!value.enabled || !value.pairs.length || !value.pairs[0]?.nodeUuid)
+      if (!value.enabled || !value.pairs.length || !value.pairs[0]?.nodeUuid) {
+        if (!value.retainSnapshotWhenDisabled)
+          snapshots.value = []
         return
+      }
+
+      snapshots.value = []
 
       let subscription: NodeCardPingCoordinatorSubscription | null = null
       const sync = () => {

@@ -1,18 +1,13 @@
 import type { PublicSettings } from '@/utils/api'
-import type {
-  NodeCardMultiPingConfig,
-  NodeCardMultiPingConfigInspection,
-  NodeCardMultiPingRuntimeConfig,
-} from '@/utils/nodeCardMultiPingConfig'
 import type { NodeCardPingTaskBindings } from '@/utils/nodeCardPingBindings'
+import type {
+  NodeCardPingConfig,
+  NodeCardPingConfigInspection,
+  NodeCardPingRuntimeConfig,
+} from '@/utils/nodeCardPingConfig'
 import { loadPublicPingTasks } from '@/services/metrics.service'
 import { requestManager } from '@/services/request.service'
 import { orderPingTasksByBackend } from '@/utils/metricSeries'
-import {
-  inspectNodeCardMultiPingConfig,
-  resolveNodeCardMultiPingRuntimeConfig,
-  serializeNodeCardMultiPingConfig,
-} from '@/utils/nodeCardMultiPingConfig'
 import {
   isNodeCardPingBindingUuid,
   isNodeCardPingTaskId,
@@ -20,9 +15,17 @@ import {
   parseNodeCardPingTaskBindings,
   serializeNodeCardPingTaskBindings,
 } from '@/utils/nodeCardPingBindings'
+import {
+  getActiveNodeCardPingTaskIds,
+  getNodeCardPingDisplayCount,
+  inspectNodeCardPingConfig,
+  resolveNodeCardPingRuntimeConfig,
+  serializeNodeCardPingConfig,
+} from '@/utils/nodeCardPingConfig'
 
 export const NODE_CARD_PING_BINDINGS_SETTING_KEY = 'nodeCardPingTaskBindings'
 export const NODE_CARD_PING_DISPLAY_CONFIG_V2_SETTING_KEY = 'nodeCardPingDisplayConfigV2'
+export const NODE_CARD_PING_DISPLAY_CONFIG_V3_SETTING_KEY = 'nodeCardPingDisplayConfigV3'
 
 export class NodeCardPingBindingApiError extends Error {
   constructor(message: string, readonly status?: number) {
@@ -71,20 +74,20 @@ export interface SaveNodeCardPingBindingsResult {
   clients: AdminPingClient[]
 }
 
-export interface NodeCardMultiPingDisplayConfigAdminData extends NodeCardPingBindingAdminData {
-  configInspection: NodeCardMultiPingConfigInspection
-  runtimeConfig: NodeCardMultiPingRuntimeConfig
+export interface NodeCardPingDisplayConfigAdminData extends NodeCardPingBindingAdminData {
+  configInspection: NodeCardPingConfigInspection
+  runtimeConfig: NodeCardPingRuntimeConfig
 }
 
-export interface SaveNodeCardMultiPingDisplayConfigV2Options {
+export interface SaveNodeCardPingDisplayConfigV3Options {
   theme: string
-  config: NodeCardMultiPingConfig
+  config: NodeCardPingConfig
 }
 
-export interface SaveNodeCardMultiPingDisplayConfigV2Result extends NodeCardPingBindingAdminData {
-  config: NodeCardMultiPingConfig
-  configInspection: NodeCardMultiPingConfigInspection
-  runtimeConfig: NodeCardMultiPingRuntimeConfig
+export interface SaveNodeCardPingDisplayConfigV3Result extends NodeCardPingBindingAdminData {
+  config: NodeCardPingConfig
+  configInspection: NodeCardPingConfigInspection
+  runtimeConfig: NodeCardPingRuntimeConfig
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -184,25 +187,22 @@ function hasAssignedTask(tasks: AdminPingTask[], nodeUuid: string, taskId: numbe
   return tasks.some(task => task.id === taskId && task.clients.includes(nodeUuid))
 }
 
-function validateMultiPingDisplayConfig(
-  config: NodeCardMultiPingConfig,
+function validatePingDisplayConfig(
+  config: NodeCardPingConfig,
   clients: AdminPingClient[],
   tasks: AdminPingTask[],
 ): void {
   const knownNodes = new Set(clients.map(client => client.uuid))
   const knownTaskIds = new Set(tasks.map(task => task.id))
+  const displayCount = getNodeCardPingDisplayCount(config)
+  const globalActiveTaskIds = getActiveNodeCardPingTaskIds(config.global.taskIds, displayCount)
 
-  if (config.global.taskIds.length === 0) {
-    if (config.global.displayCount !== 1)
-      throw new NodeCardPingBindingApiError('全局延迟配置为空时只能保留单栏聚合模式')
-  }
-  else if (config.global.taskIds.length !== config.global.displayCount) {
-    throw new NodeCardPingBindingApiError('全局延迟任务数量与显示栏数不一致')
-  }
+  if (globalActiveTaskIds.length !== displayCount)
+    throw new NodeCardPingBindingApiError(`全局配置需要选择 ${displayCount} 个不重复的探测任务`)
 
-  for (const taskId of config.global.taskIds) {
+  for (const taskId of config.global.taskIds.filter(taskId => taskId !== null)) {
     if (!knownTaskIds.has(taskId))
-      throw new NodeCardPingBindingApiError(`全局延迟任务 ${taskId} 已删除，无法保存`)
+      throw new NodeCardPingBindingApiError(`全局探测任务 ${taskId} 已删除，无法保存`)
   }
 
   for (const [nodeUuid, nodeConfig] of Object.entries(config.nodes)) {
@@ -211,11 +211,16 @@ function validateMultiPingDisplayConfig(
     if (nodeConfig.mode !== 'custom')
       continue
 
-    if (nodeConfig.taskIds.length !== nodeConfig.displayCount)
-      throw new NodeCardPingBindingApiError(`节点 ${nodeUuid} 的延迟任务数量与显示栏数不一致`)
-    for (const taskId of nodeConfig.taskIds) {
+    const activeTaskIds = getActiveNodeCardPingTaskIds(nodeConfig.taskIds, displayCount)
+    if (activeTaskIds.length !== displayCount)
+      throw new NodeCardPingBindingApiError(`节点 ${nodeUuid} 需要选择 ${displayCount} 个不重复的探测任务`)
+    for (const taskId of activeTaskIds) {
       if (!hasAssignedTask(tasks, nodeUuid, taskId))
-        throw new NodeCardPingBindingApiError(`节点 ${nodeUuid} 的延迟任务 ${taskId} 已删除或不再分配给该节点`)
+        throw new NodeCardPingBindingApiError(`节点 ${nodeUuid} 的探测任务 ${taskId} 已删除或不再分配给该节点`)
+    }
+    for (const taskId of nodeConfig.taskIds.slice(displayCount).filter(taskId => taskId !== null)) {
+      if (!knownTaskIds.has(taskId))
+        throw new NodeCardPingBindingApiError(`节点 ${nodeUuid} 保留的隐藏探测任务 ${taskId} 已删除，无法保存`)
     }
   }
 }
@@ -313,12 +318,13 @@ export async function loadNodeCardPingBindingAdminData(): Promise<NodeCardPingBi
   })
 }
 
-export async function loadNodeCardMultiPingDisplayConfigAdminData(): Promise<NodeCardMultiPingDisplayConfigAdminData> {
+export async function loadNodeCardPingDisplayConfigAdminData(): Promise<NodeCardPingDisplayConfigAdminData> {
   const data = await loadNodeCardPingBindingAdminData()
-  const configInspection = inspectNodeCardMultiPingConfig(
-    data.settings[NODE_CARD_PING_DISPLAY_CONFIG_V2_SETTING_KEY],
+  const configInspection = inspectNodeCardPingConfig(
+    data.settings[NODE_CARD_PING_DISPLAY_CONFIG_V3_SETTING_KEY],
   )
-  const runtimeConfig = resolveNodeCardMultiPingRuntimeConfig(
+  const runtimeConfig = resolveNodeCardPingRuntimeConfig(
+    data.settings[NODE_CARD_PING_DISPLAY_CONFIG_V3_SETTING_KEY],
     data.settings[NODE_CARD_PING_DISPLAY_CONFIG_V2_SETTING_KEY],
     parseNodeCardPingTaskBindings(data.settings[NODE_CARD_PING_BINDINGS_SETTING_KEY]),
   )
@@ -391,29 +397,29 @@ export async function saveNodeCardPingTaskBindings(options: SaveNodeCardPingBind
   })
 }
 
-let multiPingConfigSaveQueue: Promise<void> = Promise.resolve()
-let multiPingConfigSaveSequence = 0
+let pingConfigSaveQueue: Promise<void> = Promise.resolve()
+let pingConfigSaveSequence = 0
 
-function enqueueMultiPingConfigSave<T>(task: () => Promise<T>): Promise<T> {
-  const result = multiPingConfigSaveQueue.then(task, task)
-  multiPingConfigSaveQueue = result.then(() => undefined, () => undefined)
+function enqueuePingConfigSave<T>(task: () => Promise<T>): Promise<T> {
+  const result = pingConfigSaveQueue.then(task, task)
+  pingConfigSaveQueue = result.then(() => undefined, () => undefined)
   return result
 }
 
-export async function saveNodeCardMultiPingDisplayConfigV2(
-  options: SaveNodeCardMultiPingDisplayConfigV2Options,
-): Promise<SaveNodeCardMultiPingDisplayConfigV2Result> {
+export async function saveNodeCardPingDisplayConfigV3(
+  options: SaveNodeCardPingDisplayConfigV3Options,
+): Promise<SaveNodeCardPingDisplayConfigV3Result> {
   if (!options.theme.trim())
     throw new NodeCardPingBindingApiError('未找到当前主题名称')
 
-  const requestedInspection = inspectNodeCardMultiPingConfig(options.config)
+  const requestedInspection = inspectNodeCardPingConfig(options.config)
   if (!requestedInspection.config)
-    throw new NodeCardPingBindingApiError(requestedInspection.reason ?? '延迟显示配置无效')
+    throw new NodeCardPingBindingApiError(requestedInspection.reason ?? '探测任务显示配置无效')
   const requestedConfig = requestedInspection.config
-  const serializedConfig = serializeNodeCardMultiPingConfig(requestedConfig)
+  const serializedConfig = serializeNodeCardPingConfig(requestedConfig)
 
-  return enqueueMultiPingConfigSave(() => {
-    const requestKey = `node-card-multi-ping-config:save:${++multiPingConfigSaveSequence}`
+  return enqueuePingConfigSave(() => {
+    const requestKey = `node-card-ping-config-v3:save:${++pingConfigSaveSequence}`
     return runAdminRequest(requestKey, async (signal) => {
       const [publicSettings, tasks, clients, publicTasks] = await Promise.all([
         loadFreshPublicSettings(signal),
@@ -426,11 +432,12 @@ export async function saveNodeCardMultiPingDisplayConfigV2(
       if (publicSettings.theme !== options.theme)
         throw new NodeCardPingBindingApiError('当前主题已切换，请重新打开延迟配置页面后再保存')
 
-      validateMultiPingDisplayConfig(requestedConfig, clients, orderedTasks)
+      validatePingDisplayConfig(requestedConfig, clients, orderedTasks)
       const legacySettingBeforeSave = freshSettings[NODE_CARD_PING_BINDINGS_SETTING_KEY]
+      const v2SettingBeforeSave = freshSettings[NODE_CARD_PING_DISPLAY_CONFIG_V2_SETTING_KEY]
       const mergedSettings = {
         ...freshSettings,
-        [NODE_CARD_PING_DISPLAY_CONFIG_V2_SETTING_KEY]: serializedConfig,
+        [NODE_CARD_PING_DISPLAY_CONFIG_V3_SETTING_KEY]: serializedConfig,
       }
       await requestJson<unknown>(`/api/admin/theme/settings?theme=${encodeURIComponent(options.theme)}`, {
         method: 'POST',
@@ -442,18 +449,24 @@ export async function saveNodeCardMultiPingDisplayConfigV2(
       if (verifiedPublicSettings.theme !== options.theme)
         throw new NodeCardPingBindingApiError('保存期间当前主题已切换，请重新打开延迟配置页面后再保存')
       const verifiedSettings = themeSettingsFromPublicSettings(verifiedPublicSettings)
-      const verifiedInspection = inspectNodeCardMultiPingConfig(
-        verifiedSettings[NODE_CARD_PING_DISPLAY_CONFIG_V2_SETTING_KEY],
+      const verifiedInspection = inspectNodeCardPingConfig(
+        verifiedSettings[NODE_CARD_PING_DISPLAY_CONFIG_V3_SETTING_KEY],
       )
       if (!verifiedInspection.config
-        || serializeNodeCardMultiPingConfig(verifiedInspection.config) !== serializedConfig) {
-        throw new NodeCardPingBindingApiError('延迟显示配置保存后未能确认，请刷新后重试')
+        || serializeNodeCardPingConfig(verifiedInspection.config) !== serializedConfig) {
+        throw new NodeCardPingBindingApiError('探测任务显示配置保存后未能确认，请刷新后重试')
       }
       if (!settingValuesEqual(
         verifiedSettings[NODE_CARD_PING_BINDINGS_SETTING_KEY],
         legacySettingBeforeSave,
       )) {
         throw new NodeCardPingBindingApiError('保存时检测到旧版延迟绑定被改动，请刷新后重试')
+      }
+      if (!settingValuesEqual(
+        verifiedSettings[NODE_CARD_PING_DISPLAY_CONFIG_V2_SETTING_KEY],
+        v2SettingBeforeSave,
+      )) {
+        throw new NodeCardPingBindingApiError('保存时检测到 v2 配置被改动，请刷新后重试')
       }
 
       return {
@@ -464,7 +477,8 @@ export async function saveNodeCardMultiPingDisplayConfigV2(
         clients,
         config: verifiedInspection.config,
         configInspection: verifiedInspection,
-        runtimeConfig: resolveNodeCardMultiPingRuntimeConfig(
+        runtimeConfig: resolveNodeCardPingRuntimeConfig(
+          verifiedSettings[NODE_CARD_PING_DISPLAY_CONFIG_V3_SETTING_KEY],
           verifiedSettings[NODE_CARD_PING_DISPLAY_CONFIG_V2_SETTING_KEY],
           parseNodeCardPingTaskBindings(verifiedSettings[NODE_CARD_PING_BINDINGS_SETTING_KEY]),
         ),

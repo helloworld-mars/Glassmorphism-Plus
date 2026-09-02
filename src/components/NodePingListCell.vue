@@ -4,8 +4,8 @@ import { useNodeCardPingTaskCatalog } from '@/composables/useNodeCardPingTaskCat
 import { useNodeMultiPingStats } from '@/composables/useNodeMultiPingStats'
 import { useNodePingDisplay } from '@/composables/useNodePingDisplay'
 import { useAppStore } from '@/stores/app'
-import { resolveNodeCardMultiPingDisplay } from '@/utils/nodeCardMultiPingConfig'
 import { getNodeCardPingTaskId } from '@/utils/nodeCardPingBindings'
+import { resolveNodeCardPingDisplay } from '@/utils/nodeCardPingConfig'
 
 const props = defineProps<{
   uuid: string
@@ -19,17 +19,17 @@ const emit = defineEmits<{
 
 const appStore = useAppStore()
 const catalog = useNodeCardPingTaskCatalog()
-const resolution = computed(() => resolveNodeCardMultiPingDisplay(
+const resolution = computed(() => resolveNodeCardPingDisplay(
   appStore.nodeCardMultiPingRuntimeConfig,
   props.uuid,
   catalog.tasks.value,
 ))
 const usesLegacy = computed(() => {
   const runtime = appStore.nodeCardMultiPingRuntimeConfig
-  if (runtime.source !== 'v2')
-    return true
   const nodeConfig = runtime.config.nodes[props.uuid.trim().toLowerCase()]
-  return nodeConfig?.mode !== 'custom' && runtime.config.global.taskIds.length === 0
+  return nodeConfig?.mode !== 'custom'
+    && !runtime.config.global.threeNetworkEnabled
+    && runtime.config.global.taskIds[0] === null
 })
 const firstTask = computed(() => resolution.value.tasks.slice(0, 1).map(task => ({
   taskId: task.id,
@@ -42,9 +42,7 @@ const { snapshots } = useNodeMultiPingStats(
   { enabled: () => props.enabled && !usesLegacy.value && catalog.loaded.value },
 )
 
-const legacySelectedTaskId = computed(() => appStore.nodeCardMultiPingRuntimeConfig.source === 'v2'
-  ? undefined
-  : getNodeCardPingTaskId(appStore.nodeCardPingTaskBindings, props.uuid))
+const legacySelectedTaskId = computed(() => getNodeCardPingTaskId(appStore.nodeCardPingTaskBindings, props.uuid))
 const legacyDisplay = useNodePingDisplay(() => props.uuid, {
   enabled: () => props.enabled && usesLegacy.value,
   selectedTaskId: legacySelectedTaskId,
@@ -64,7 +62,7 @@ const multiLatencyBars = computed(() => {
     tooltip: point.time || '等待 Ping 数据',
     className: point.latencyState === 'pending'
       ? 'bg-transparent'
-      : point.latencyState === 'confirmed-missing'
+      : point.latencyState === 'confirmed-missing' || point.latency === null
         ? 'bg-muted-foreground/15'
         : 'bg-emerald-500/80',
   }))
@@ -85,6 +83,21 @@ const multiLossBars = computed(() => {
 })
 const displayLatencyBars = computed(() => usesLegacy.value ? legacyDisplay.latencyRenderBars.value : multiLatencyBars.value)
 const displayLossBars = computed(() => usesLegacy.value ? legacyDisplay.lossRenderBars.value : multiLossBars.value)
+const firstSnapshot = computed(() => snapshots.value[0])
+const latencyDisplay = computed(() => {
+  if (usesLegacy.value)
+    return legacyDisplay.latencyDisplay.value
+  const snapshot = firstSnapshot.value
+  if (snapshot?.avgLoss === 100 || snapshot?.avgLatency === null || snapshot?.avgLatency === undefined)
+    return '-'
+  return `${Math.round(snapshot.avgLatency)} ms`
+})
+const lossDisplay = computed(() => {
+  if (usesLegacy.value)
+    return legacyDisplay.lossDisplay.value
+  const loss = firstSnapshot.value?.avgLoss
+  return loss === null || loss === undefined ? '-' : `${loss.toFixed(1)}%`
+})
 </script>
 
 <template>
@@ -94,6 +107,8 @@ const displayLossBars = computed(() => usesLegacy.value ? legacyDisplay.lossRend
     aria-label="打开延迟和丢包监测"
     @click.stop="emit('click')"
   >
+    <span class="sr-only" :aria-label="`延迟 ${latencyDisplay}`">延迟 {{ latencyDisplay }}</span>
+    <span class="sr-only" :aria-label="`丢包 ${lossDisplay}`">丢包 {{ lossDisplay }}</span>
     <div class="group/panel relative items-center gap-1 opacity-80 hover:opacity-100">
       <div
         class="grid h-1 cursor-auto items-end gap-[1px] transition-all hover:h-2.5"

@@ -28,6 +28,7 @@ export interface VisualFixtureOptions {
   missingCpuMetricHistory?: boolean
   nodeCardPingTaskBindings?: string
   nodeCardPingDisplayConfigV2?: string
+  nodeCardPingDisplayConfigV3?: string
   nodeCardPingFixture?: NodeCardPingFixture
   nodeCount?: number
   clockNow?: string
@@ -132,6 +133,7 @@ export interface KomariFixtureController {
   setSiteName: (value: string) => void
   setNodeCardPingTaskBindings: (value: string) => void
   setNodeCardPingDisplayConfigV2: (value: string) => void
+  setNodeCardPingDisplayConfigV3: (value: string) => void
   setThemeSetting: (key: string, value: unknown) => void
   setAdminAccess: (value: 'admin' | 'guest' | 'forbidden') => void
   setNodeCardPingFixture: (value: Partial<NodeCardPingFixture>) => void
@@ -840,8 +842,7 @@ async function handleRpc(
 ): Promise<void> {
   const payload = route.request().postDataJSON() as { id: unknown, method: string, params?: Record<string, unknown> }
   const uuid = typeof payload.params?.uuid === 'string' ? payload.params.uuid : uuidFor(0)
-  const isPingRequest = payload.method === 'public:getPublicPingTasks'
-    || (payload.method === 'common:getRecords' && payload.params?.type === 'ping')
+  const isPingRequest = (payload.method === 'common:getRecords' && payload.params?.type === 'ping')
     || payload.method === 'public:getPingRecords'
     || isPingMetricRequest(payload.method, payload.params)
   const requestAt = isPingRequest ? await getNow() : 0
@@ -1051,6 +1052,9 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     ...(options.nodeCardPingDisplayConfigV2 === undefined
       ? {}
       : { nodeCardPingDisplayConfigV2: options.nodeCardPingDisplayConfigV2 }),
+    ...(options.nodeCardPingDisplayConfigV3 === undefined
+      ? {}
+      : { nodeCardPingDisplayConfigV3: options.nodeCardPingDisplayConfigV3 }),
     fixtureUnrelatedSetting: 'preserve-me',
   }
 
@@ -1208,6 +1212,9 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     },
     setNodeCardPingDisplayConfigV2: (value) => {
       settings.nodeCardPingDisplayConfigV2 = value
+    },
+    setNodeCardPingDisplayConfigV3: (value) => {
+      settings.nodeCardPingDisplayConfigV3 = value
     },
     setThemeSetting: (key, value) => {
       settings[key] = value

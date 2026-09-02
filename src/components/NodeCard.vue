@@ -33,14 +33,12 @@ const appStore = useAppStore()
 const isFavorite = computed(() => appStore.isFavoriteNode(props.node.uuid))
 const usesLegacyPingDisplay = computed(() => {
   const runtime = appStore.nodeCardMultiPingRuntimeConfig
-  if (runtime.source !== 'v2')
-    return true
   const nodeConfig = runtime.config.nodes[props.node.uuid.trim().toLowerCase()]
-  return nodeConfig?.mode !== 'custom' && runtime.config.global.taskIds.length === 0
+  return nodeConfig?.mode !== 'custom'
+    && !runtime.config.global.threeNetworkEnabled
+    && runtime.config.global.taskIds[0] === null
 })
-const legacySelectedTaskId = computed(() => appStore.nodeCardMultiPingRuntimeConfig.source === 'v2'
-  ? undefined
-  : getNodeCardPingTaskId(appStore.nodeCardPingTaskBindings, props.node.uuid))
+const legacySelectedTaskId = computed(() => getNodeCardPingTaskId(appStore.nodeCardPingTaskBindings, props.node.uuid))
 
 function toggleFavorite(): void {
   appStore.toggleFavoriteNode(props.node.uuid)
@@ -518,7 +516,7 @@ function hasRegion(region: string | null | undefined): boolean {
           </div>
         </div>
 
-        <!-- 延迟 + 丢包：v1/aggregate 保留旧双面板；v2 使用真实 task strips。 -->
+        <!-- 延迟 + 丢包：无显式任务时保留旧双面板；v3 使用固定一行或三行任务条。 -->
         <div v-if="usesLegacyPingDisplay" class="grid grid-cols-2 gap-1.5" data-node-ping-mode="legacy">
           <button
             v-for="panel in nodeCardPingPanels"

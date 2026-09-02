@@ -3,7 +3,7 @@ import type { PermissionKey } from '@/services/auth.service'
 import type { HomeQuickControlKey } from '@/stores/app'
 import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
-import { useDebounceFn, useMediaQuery } from '@vueuse/core'
+import { useDebounceFn } from '@vueuse/core'
 import { computed, defineAsyncComponent, nextTick, onActivated, onDeactivated, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DeferredRender from '@/components/DeferredRender.vue'
@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Empty } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ensureNodeCardPingTaskCatalog } from '@/composables/useNodeCardPingTaskCatalog'
 import { useVisitorAudit } from '@/composables/useVisitorAudit'
 import { UI_CONFIG } from '@/constants/ui'
 import { useAppStore } from '@/stores/app'
@@ -71,6 +72,21 @@ const isViewActive = ref(true)
 const pingSettingsView = 'pingsettings'
 const legacyPingSettingsView = 'node-ping-bindings'
 const isPingCenterView = computed(() => route.query.view === pingSettingsView || route.query.view === legacyPingSettingsView)
+const usesNodeCardTaskCatalog = computed(() => {
+  const runtime = appStore.nodeCardMultiPingRuntimeConfig
+  return runtime.config.global.threeNetworkEnabled
+    || runtime.config.global.taskIds[0] !== null
+    || Object.values(runtime.config.nodes).some(nodeConfig => nodeConfig.mode === 'custom')
+})
+
+// Start the small public task-catalog request before async NodeCard instances
+// mount. Otherwise legacy cards can fill the shared request pool first, and a
+// paused telemetry refresh can starve catalog validation (and warm-cache
+// hydration) for the one card that uses an explicit task.
+watch(usesNodeCardTaskCatalog, (needed) => {
+  if (needed)
+    void ensureNodeCardPingTaskCatalog()
+}, { immediate: true })
 
 watch(() => route.query.view, (view) => {
   if (view !== legacyPingSettingsView)
@@ -281,33 +297,17 @@ const isDenseNodeGrid = computed(() => appStore.nodeViewMode === 'card' && nodeL
 const enableNodeCardTransition = computed(() => !appStore.disablePageAnimation && !isDenseNodeGrid.value)
 const reduceDenseNodeEffects = computed(() => appStore.nodeViewMode === 'card' && nodeList.value.length > denseNodePingAnimationThreshold)
 const deferNodeCards = computed(() => appStore.nodeViewMode === 'card' && nodeList.value.length > UI_CONFIG.virtualList.nodeThreshold)
-const isSmallViewportOrWider = useMediaQuery('(min-width: 640px)')
-
-function getDeferredNodeCardHeight(nodeUuid: string): number {
+function getDeferredNodeCardHeight(_nodeUuid: string): number {
   const size = appStore.nodeCardSize
   const legacyBaseHeight = { mini: 220, compact: 270, comfortable: 310, large: 350 }[size]
-  const runtime = appStore.nodeCardMultiPingRuntimeConfig
-  const nodeConfig = runtime.config.nodes[nodeUuid.trim().toLowerCase()]
-  const usesMultiPing = runtime.source === 'v2'
-    && (nodeConfig?.mode === 'custom' || runtime.config.global.taskIds.length > 0)
-  if (!usesMultiPing)
+  if (!usesNodeCardTaskCatalog.value)
     return legacyBaseHeight
 
-  const displayCount = nodeConfig?.mode === 'custom'
-    ? nodeConfig.displayCount
-    : runtime.config.global.displayCount
-  if (size === 'mini')
-    return 244 + Math.max(0, displayCount - 1) * 42
-  if (size === 'compact')
-    return 290 + Math.max(0, displayCount - 1) * 54
-  if (size === 'comfortable') {
-    const extraRows = isSmallViewportOrWider.value && displayCount === 2
-      ? 0
-      : Math.max(0, displayCount - 1)
-    return 334 + extraRows * 62
-  }
-  const extraRows = isSmallViewportOrWider.value ? 0 : Math.max(0, displayCount - 1)
-  return 366 + extraRows * 62
+  const runtime = appStore.nodeCardMultiPingRuntimeConfig
+  const displayCount = runtime.config.global.threeNetworkEnabled ? 3 : 1
+  const singleHeight = { mini: 244, compact: 290, comfortable: 334, large: 366 }[size]
+  const extraRowHeight = { mini: 42, compact: 54, comfortable: 62, large: 62 }[size]
+  return singleHeight + Math.max(0, displayCount - 1) * extraRowHeight
 }
 
 const quickControlCounts = computed<Record<HomeQuickControlKey, number>>(() => {

@@ -5,8 +5,8 @@ import { useStorageAsync } from '@vueuse/core'
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { getAuthSession, requirePermission, setAuthSessionFromLogin, verifyLogin } from '@/services/auth.service'
-import { resolveNodeCardMultiPingRuntimeConfig } from '@/utils/nodeCardMultiPingConfig'
 import { parseNodeCardPingTaskBindings } from '@/utils/nodeCardPingBindings'
+import { resolveNodeCardPingRuntimeConfig } from '@/utils/nodeCardPingConfig'
 
 export type ThemeMode = 'auto' | 'light' | 'dark'
 export type ManagedThemeMode = 'beijing' | 'light' | 'dark'
@@ -967,7 +967,8 @@ const useAppStore = defineStore('app', () => {
   })
 
   const nodeCardPingTaskBindings = computed(() => parseNodeCardPingTaskBindings(themeSettings.value.nodeCardPingTaskBindings))
-  const nodeCardMultiPingRuntimeConfig = computed(() => resolveNodeCardMultiPingRuntimeConfig(
+  const nodeCardMultiPingRuntimeConfig = computed(() => resolveNodeCardPingRuntimeConfig(
+    themeSettings.value.nodeCardPingDisplayConfigV3,
     themeSettings.value.nodeCardPingDisplayConfigV2,
     nodeCardPingTaskBindings.value,
   ))
