@@ -547,7 +547,7 @@ function hasRegion(region: string | null | undefined): boolean {
                 placement="top" :content="bar.tooltip" class="h-full min-w-0 w-full"
               >
                 <span
-                  class="block h-full w-full rounded-[1px] transition-transform duration-150 group-hover/data-tooltip:scale-y-160 group-hover/panel:opacity-60 group-hover/data-tooltip:!opacity-100"
+                  class="block h-full w-full rounded-[1px] transition-[filter,opacity] duration-150 group-hover/data-tooltip:brightness-125 group-hover/panel:opacity-60 group-hover/data-tooltip:!opacity-100"
                   :class="bar.className"
                 />
               </DataTooltip>

@@ -490,6 +490,118 @@ header {
   background-color: rgb(255 255 255 / 0.05) !important;
 }
 
+/* ===== NodeCard Ping fixed 20-bucket rails ===== */
+
+.node-card-ping-task-strip {
+  --ping-bucket-height: 4px;
+  --ping-bucket-gap: 2px;
+  --ping-row-gap: 3px;
+  --ping-label-width: 24px;
+  --ping-strip-height: 52px;
+  --ping-strip-padding-x: 8px;
+  --ping-strip-padding-y: 6px;
+
+  box-sizing: border-box;
+  display: flex;
+  height: var(--ping-strip-height);
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--ping-row-gap);
+  padding: var(--ping-strip-padding-y) var(--ping-strip-padding-x);
+}
+
+.node-card-ping-task-strip[data-node-ping-size='mini'] {
+  --ping-bucket-height: 3px;
+  --ping-bucket-gap: 1px;
+  --ping-row-gap: 3px;
+  --ping-label-width: 22px;
+  --ping-strip-height: 40px;
+  --ping-strip-padding-x: 6px;
+  --ping-strip-padding-y: 4px;
+}
+
+.node-card-ping-task-strip[data-node-ping-size='comfortable'],
+.node-card-ping-task-strip[data-node-ping-size='large'] {
+  --ping-bucket-height: 5px;
+  --ping-bucket-gap: 2px;
+  --ping-row-gap: 4px;
+  --ping-strip-height: 58px;
+  --ping-strip-padding-x: 10px;
+  --ping-strip-padding-y: 8px;
+}
+
+.node-card-ping-task-header {
+  min-height: 11px;
+}
+
+.node-card-ping-summary > span {
+  font-size: 0.72em;
+  opacity: 0.82;
+}
+
+.node-card-ping-trend-row {
+  display: grid;
+  min-width: 0;
+  height: var(--ping-bucket-height);
+  grid-template-columns: var(--ping-label-width) minmax(0, 1fr);
+  align-items: center;
+  column-gap: 4px;
+}
+
+.node-card-ping-trend-label {
+  font-size: 8px;
+  line-height: 1;
+}
+
+.node-card-ping-bucket-grid {
+  display: grid;
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  height: var(--ping-bucket-height);
+  grid-template-columns: repeat(20, minmax(0, 1fr));
+  align-items: stretch;
+  column-gap: var(--ping-bucket-gap);
+}
+
+.node-card-ping-bucket-hitbox,
+.node-card-ping-bucket-fill {
+  box-sizing: border-box;
+  display: block;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  transform: none !important;
+}
+
+.node-card-ping-bucket-hitbox {
+  position: relative;
+  outline: 0 solid transparent;
+  outline-offset: 1px;
+}
+
+.node-card-ping-bucket-fill {
+  border-radius: 1px;
+  transition:
+    filter 120ms ease,
+    opacity 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.node-card-ping-bucket-hitbox:hover > .node-card-ping-bucket-fill,
+.node-card-ping-bucket-hitbox:focus > .node-card-ping-bucket-fill {
+  filter: brightness(1.22);
+  box-shadow: 0 0 0 1px color-mix(in srgb, currentcolor 38%, transparent) inset;
+}
+
+.node-card-ping-bucket-hitbox:focus-visible {
+  outline-width: 1px;
+  outline-color: var(--color-ring);
+}
+
 /* Firefox composites many backdrop-filter layers less efficiently than Chromium.
    Use opaque-enough surfaces there so long node lists and animated globes stay smooth. */
 @supports (-moz-appearance: none) {

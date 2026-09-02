@@ -32,8 +32,6 @@ const status = computed(() => props.snapshot?.status ?? 'pending')
 const history = computed(() => props.snapshot?.history.length === 20
   ? props.snapshot.history
   : placeholderHistory)
-const observedLatencies = computed(() => history.value.flatMap(point => point.latency === null ? [] : [point.latency]))
-const latencyCeiling = computed(() => Math.max(1, ...observedLatencies.value))
 const latestSample = computed(() => props.snapshot?.samples.reduce<NodeCardPingSample | undefined>((latest, sample) => (
   sample.observed && (!latest || sample.timestamp > latest.timestamp) ? sample : latest
 ), undefined))
@@ -51,8 +49,6 @@ const lossText = computed(() => latestLossPercent.value === null
 const statusText = computed(() => {
   if (props.snapshot?.error)
     return '更新失败'
-  if (latestLossPercent.value === 100)
-    return '100% 丢包'
   return ({
     pending: '等待采样',
     data: '',
@@ -61,7 +57,7 @@ const statusText = computed(() => {
     stale: '数据稍旧',
   } as const)[status.value]
 })
-const accessibleStatusText = computed(() => statusText.value || '数据正常')
+const accessibleStatusText = computed(() => latestLossPercent.value === 100 ? '延迟不可达' : statusText.value || '数据正常')
 const statusClass = computed(() => {
   if (props.snapshot?.error || latestLossPercent.value === 100)
     return 'bg-destructive'
@@ -73,12 +69,6 @@ const statusClass = computed(() => {
     stale: 'bg-sky-500',
   } as const)[status.value]
 })
-const stripClass = computed(() => ({
-  mini: 'h-9 gap-1 px-1.5 py-1',
-  compact: 'h-12 gap-1.5 px-2 py-1.5',
-  comfortable: 'h-14 gap-2 px-2.5 py-2',
-  large: 'h-14 gap-2 px-2.5 py-2',
-}[props.size]))
 const tooltip = computed(() => {
   const lines = [
     `${props.taskName}（ID ${props.taskId}）`,
@@ -97,23 +87,15 @@ const tooltip = computed(() => {
   return lines.join('\n')
 })
 
-function latencyBarStyle(point: NodeCardPingHistoryPoint): Record<string, string> {
-  if (point.latencyState !== 'data' || point.latency === null || point.loss === 100)
-    return { height: '22%' }
-  return { height: `${Math.max(18, Math.min(100, point.latency / latencyCeiling.value * 100))}%` }
-}
-
-function lossBarStyle(point: NodeCardPingHistoryPoint): Record<string, string> {
-  if (point.lossState !== 'data' || point.loss === null)
-    return { height: '22%' }
-  return { height: `${Math.max(18, Math.min(100, point.loss))}%` }
-}
-
 function latencyBarClass(point: NodeCardPingHistoryPoint): string {
   if (point.latencyState === 'pending')
     return 'bg-transparent'
   if (point.latencyState === 'confirmed-missing' || point.latency === null || point.loss === 100)
     return 'bg-muted-foreground/15'
+  if (point.latency >= 150)
+    return 'bg-rose-500/85'
+  if (point.latency >= 80)
+    return 'bg-amber-500/85'
   return 'bg-emerald-500/75'
 }
 
@@ -123,22 +105,41 @@ function lossBarClass(point: NodeCardPingHistoryPoint): string {
     return 'bg-transparent'
   if (state === 'confirmed-missing' || point.loss === null)
     return 'bg-muted-foreground/15'
-  return point.loss > 0 ? 'bg-rose-500/80' : 'bg-emerald-500/75'
+  if (point.loss >= 100)
+    return 'bg-rose-600/90'
+  return point.loss > 0 ? 'bg-amber-500/85' : 'bg-emerald-500/75'
+}
+
+function latencyBucketState(point: NodeCardPingHistoryPoint): string {
+  if (point.loss === 100)
+    return 'unreachable'
+  if (point.latency !== null)
+    return 'data'
+  if (props.snapshot?.error && point.latencyState === 'pending')
+    return 'error'
+  return point.latencyState
+}
+
+function lossBucketState(point: NodeCardPingHistoryPoint): string {
+  if (point.loss !== null)
+    return 'data'
+  return props.snapshot?.error && point.lossState === 'pending' ? 'error' : point.lossState
 }
 
 function barTooltip(point: NodeCardPingHistoryPoint, metric: 'latency' | 'loss'): string {
   const state = metric === 'latency' ? point.latencyState : point.lossState
   const sampleTime = metric === 'latency' ? point.latencySampleTime : point.lossSampleTime
   const value = metric === 'latency' ? point.latency : point.loss
+  const effectiveState = state === 'pending' && value !== null ? 'data' : state
   const timestamp = sampleTime || point.time ? formatDateTime(sampleTime ?? point.time, 'HH:mm:ss') : ''
   const prefix = timestamp ? `${timestamp}\n` : ''
 
-  if (state === 'pending')
+  if (effectiveState === 'pending')
     return props.snapshot?.error ? `${prefix}加载失败，等待重试` : ''
   if (value === null) {
-    if (state === 'data' && metric === 'latency' && point.loss === 100)
-      return `${prefix}延迟不可用（100% 丢包）`
-    return `${prefix}${state === 'confirmed-missing' ? '无采样数据' : '暂无有效数据'}`
+    if (effectiveState === 'data' && metric === 'latency' && point.loss === 100)
+      return `${prefix}延迟不可用（探测不可达）`
+    return `${prefix}${effectiveState === 'confirmed-missing' ? '无采样数据' : '暂无有效数据'}`
   }
   return metric === 'latency'
     ? `${prefix}${Math.round(value)} ms`
@@ -149,13 +150,14 @@ function barTooltip(point: NodeCardPingHistoryPoint, metric: 'latency' | 'loss')
 <template>
   <div
     class="node-card-ping-task-strip min-w-0 rounded-lg bg-slate-500/5 text-left"
-    :class="[stripClass, !online && 'opacity-50']"
+    :class="!online && 'opacity-50'"
     :title="tooltip"
+    :data-node-ping-size="size"
     :data-node-ping-task-id="taskId"
     :data-node-ping-status="status"
     @click.stop="emit('click')"
   >
-    <div class="flex min-w-0 items-center gap-1 text-[10px] leading-none sm:text-[11px]">
+    <div class="node-card-ping-task-header flex min-w-0 items-center gap-1 text-[10px] leading-none sm:text-[11px]">
       <span class="size-1.5 shrink-0 rounded-full" :class="statusClass" />
       <button
         type="button"
@@ -167,8 +169,8 @@ function barTooltip(point: NodeCardPingHistoryPoint, metric: 'latency' | 'loss')
         {{ taskName }}
       </button>
       <span v-if="statusText" class="shrink-0 text-[9px]" :class="latestLossPercent === 100 || status === 'error' ? 'text-destructive' : 'text-muted-foreground'">{{ statusText }}</span>
-      <span class="shrink-0 tabular-nums text-muted-foreground">{{ latencyText }}</span>
-      <span class="shrink-0 tabular-nums" :class="latestLossPercent === 100 ? 'text-destructive' : 'text-muted-foreground'">{{ lossText }}</span>
+      <span class="node-card-ping-summary shrink-0 tabular-nums text-muted-foreground" data-node-ping-summary="latency"><span>延迟</span> {{ latencyText }}</span>
+      <span class="node-card-ping-summary shrink-0 tabular-nums" :class="latestLossPercent === 100 ? 'text-destructive' : 'text-muted-foreground'" data-node-ping-summary="loss"><span>丢包</span> {{ lossText }}</span>
       <DataTooltip :content="tooltip" as="span" placement="top" width="220" content-class="whitespace-pre-line leading-4" class="shrink-0">
         <button
           type="button"
@@ -181,49 +183,47 @@ function barTooltip(point: NodeCardPingHistoryPoint, metric: 'latency' | 'loss')
         </button>
       </DataTooltip>
     </div>
-    <div class="grid min-w-0 grid-cols-[22px_1fr] items-end gap-1" data-node-ping-panel="latency" data-node-ping-trend="latency">
-      <span class="text-[8px] leading-none text-muted-foreground" data-node-ping-header="latency">延迟</span>
-      <span class="grid h-[4px] min-w-0 grid-cols-20 items-end gap-px" data-node-ping-bars="latency">
+    <div class="node-card-ping-trend-row" data-node-ping-panel="latency" data-node-ping-trend="latency">
+      <span class="node-card-ping-trend-label text-muted-foreground" data-node-ping-header="latency">延迟</span>
+      <span class="node-card-ping-bucket-grid" data-node-ping-bars="latency">
         <DataTooltip
           v-for="(point, index) in history"
           :key="`latency-${index}`"
           as="span"
           data-node-ping-bar
           :data-node-ping-bucket-time="point.time || undefined"
-          :data-node-ping-state="point.latencyState"
+          :data-node-ping-state="latencyBucketState(point)"
           placement="top"
           :content="barTooltip(point, 'latency')"
           content-class="whitespace-pre-line"
-          class="flex h-full min-w-0 w-full items-end"
+          class="node-card-ping-bucket-hitbox"
+          tabindex="-1"
+          :aria-label="barTooltip(point, 'latency') || undefined"
         >
-          <span class="block min-w-0 w-full rounded-[1px]" :class="latencyBarClass(point)" :style="latencyBarStyle(point)" />
+          <span class="node-card-ping-bucket-fill" :class="latencyBarClass(point)" data-node-ping-bucket-fill />
         </DataTooltip>
       </span>
     </div>
-    <div class="grid min-w-0 grid-cols-[22px_1fr] items-end gap-1" data-node-ping-panel="loss" data-node-ping-trend="loss">
-      <span class="text-[8px] leading-none text-muted-foreground" data-node-ping-header="loss">丢包</span>
-      <span class="grid h-[4px] min-w-0 grid-cols-20 items-end gap-px" data-node-ping-bars="loss">
+    <div class="node-card-ping-trend-row" data-node-ping-panel="loss" data-node-ping-trend="loss">
+      <span class="node-card-ping-trend-label text-muted-foreground" data-node-ping-header="loss">丢包</span>
+      <span class="node-card-ping-bucket-grid" data-node-ping-bars="loss">
         <DataTooltip
           v-for="(point, index) in history"
           :key="`loss-${index}`"
           as="span"
           data-node-ping-bar
           :data-node-ping-bucket-time="point.time || undefined"
-          :data-node-ping-state="point.lossState"
+          :data-node-ping-state="lossBucketState(point)"
           placement="top"
           :content="barTooltip(point, 'loss')"
           content-class="whitespace-pre-line"
-          class="flex h-full min-w-0 w-full items-end"
+          class="node-card-ping-bucket-hitbox"
+          tabindex="-1"
+          :aria-label="barTooltip(point, 'loss') || undefined"
         >
-          <span class="block min-w-0 w-full rounded-[1px]" :class="lossBarClass(point)" :style="lossBarStyle(point)" />
+          <span class="node-card-ping-bucket-fill" :class="lossBarClass(point)" data-node-ping-bucket-fill />
         </DataTooltip>
       </span>
     </div>
   </div>
 </template>
-
-<style scoped>
-.grid-cols-20 {
-  grid-template-columns: repeat(20, minmax(0, 1fr));
-}
-</style>

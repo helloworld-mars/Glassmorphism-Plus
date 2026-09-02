@@ -37,14 +37,14 @@ test('Plus documentation keeps its own version identity and preserves upstream a
 
   expect(readme).toContain('# 🌌 Komari Glassmorphism Plus')
   expect(readme).toContain('当前 Plus 版本')
-  expect(readme).toContain('**v2.1.0**')
+  expect(readme).toContain('**v2.2.0**')
   expect(readme).toContain('sanrokamlan Glassmorphism v3.3.7')
-  expect(readme).toContain('v2.1.0 GitHub Release 的 installer asset 数量为 0')
+  expect(readme).toContain('v2.2.0 GitHub Release 的 installer asset 数量为 0')
   expect(readme).toContain('Source code (zip)')
   expect(readme).not.toMatch(/^#{2,}\s+(?:\S.*)?v3\.\d/m)
 
   const changelogVersions = Array.from(changelog.matchAll(/^## \[([^\]]+)\]/gm), match => match[1])
-  expect(changelogVersions).toEqual(['2.1.0', '2.0.0', '1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
+  expect(changelogVersions).toEqual(['2.2.0', '2.1.0', '2.0.0', '1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
   expect(upstream).toContain('Current upstream baseline')
   expect(upstream).toContain('v3.3.7')
   expect(credits).toContain('helloworld-mars')
@@ -202,7 +202,7 @@ async function expectNodeCardPingBucketState(
   page: Page,
   metric: 'latency' | 'loss',
   time: string,
-  state: 'pending' | 'data' | 'confirmed-missing',
+  state: 'pending' | 'data' | 'confirmed-missing' | 'error' | 'unreachable',
 ): Promise<void> {
   await expect(nodeCardPingBucket(page, metric, time)).toHaveAttribute('data-node-ping-state', state)
 }
@@ -210,7 +210,7 @@ async function expectNodeCardPingBucketState(
 async function expectAllNodeCardPingBucketStates(
   page: Page,
   metric: 'latency' | 'loss',
-  state: 'pending' | 'data' | 'confirmed-missing',
+  state: 'pending' | 'data' | 'confirmed-missing' | 'error' | 'unreachable',
 ): Promise<void> {
   const bars = primaryNodeCard(page).locator(`[data-node-ping-bars="${metric}"] [data-node-ping-bar]`)
   await expect(bars).toHaveCount(20)
@@ -937,13 +937,13 @@ test('brand metadata and homepage footer retain current and original attribution
     name: 'Komari Glassmorphism Plus',
     short: 'glassmorphism-plus',
     description: 'A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.',
-    version: '2.1.0',
+    version: '2.2.0',
     author: 'helloworld-mars',
     url: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(packageMetadata).toMatchObject({
     name: 'komari-theme-glassmorphism-plus',
-    version: '2.1.0',
+    version: '2.2.0',
     homepage: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(themeManifest.short).toMatch(/^[\w-]+$/)
@@ -987,7 +987,7 @@ test('brand metadata and homepage footer retain current and original attribution
 
   const footer = page.locator('footer')
   await expect(footer.getByRole('link', { name: 'Glassmorphism Plus' })).toHaveAttribute('href', 'https://github.com/helloworld-mars/Glassmorphism-Plus')
-  await expect(footer.getByText('v2.1.0 · helloworld-mars', { exact: true }).first()).toBeVisible()
+  await expect(footer.getByText('v2.2.0 · helloworld-mars', { exact: true }).first()).toBeVisible()
   await expect(footer.getByRole('link', { name: 'Based on the original theme by sanrokamlan' }))
     .toHaveAttribute('href', 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism')
   await expect(footer).not.toContainText('unknown')
@@ -1904,7 +1904,7 @@ test.describe('node-card per-node ping task bindings', () => {
     })).toBe(true)
   })
 
-  test('v1.3.3 keeps cold Metric and Legacy transport failures PENDING with an error tooltip', async ({ page }) => {
+  test('cold Metric and Legacy transport failures render ERROR buckets while retries stay bounded', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 })
     const fixture = await installKomariFixture(page, {
       fakeTimers: true,
@@ -1920,21 +1920,21 @@ test.describe('node-card per-node ping task bindings', () => {
 
     await expectNodeCardPing(page, '-', '-')
     for (const metric of ['latency', 'loss'] as const)
-      await expectAllNodeCardPingBucketStates(page, metric, 'pending')
+      await expectAllNodeCardPingBucketStates(page, metric, 'error')
     await expectNodeCardPingTooltip(page, 'latency', '加载失败')
     await expectNodeCardPingTooltip(page, 'loss', '加载失败')
 
     const requestCountBeforeRetries = fixture.timeline.length
     await fixture.advanceTime(45_000)
     for (const metric of ['latency', 'loss'] as const)
-      await expectAllNodeCardPingBucketStates(page, metric, 'pending')
+      await expectAllNodeCardPingBucketStates(page, metric, 'error')
     expect(fixture.timeline.length).toBeGreaterThan(requestCountBeforeRetries)
     expect(fixture.timeline.some(entry => entry.method === 'public:queryMetrics')).toBe(true)
     expect(fixture.timeline.some(entry => entry.method === 'common:getRecords' || entry.method === 'public:getPingRecords')).toBe(true)
     expect(fixture.timeline.every(entry => entry.responseSamples.length === 0)).toBe(true)
   })
 
-  test('v1.3.3 treats an observed 100% loss probe as latency DATA, never as no-sample', async ({ page }) => {
+  test('an observed 100% loss probe renders unreachable latency without becoming no-sample', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 })
     await installKomariFixture(page, {
       fakeTimers: true,
@@ -1960,9 +1960,9 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page)
 
-    await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'data')
+    await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'unreachable')
     await expectNodeCardPingBucketState(page, 'loss', PING_INGESTION_BUCKET, 'data')
-    await expectNodeCardPingTooltip(page, 'latency', '12:00:00\n延迟不可用（100% 丢包）')
+    await expectNodeCardPingTooltip(page, 'latency', '12:00:00\n延迟不可用（探测不可达）')
     await expectNodeCardPingTooltip(page, 'loss', '12:00:00\n100.0%')
     const latencyTooltipContents = await primaryNodeCard(page)
       .locator('[data-node-ping-bars="latency"] [role="tooltip"]')
@@ -2046,10 +2046,11 @@ test.describe('node-card per-node ping task bindings', () => {
     })
 
     // NodeCard starts cold: its tagged raw query and legacy fallback fail, so
-    // it must remain pending rather than manufacture missing telemetry.
+    // unresolved buckets report the transport failure rather than manufacture
+    // missing telemetry.
     await openStablePage(page)
     for (const metric of ['latency', 'loss'] as const)
-      await expectAllNodeCardPingBucketStates(page, metric, 'pending')
+      await expectAllNodeCardPingBucketStates(page, metric, 'error')
     await expectNodeCardPingTooltip(page, 'latency', '加载失败')
 
     // The backend makes the real :02 sample visible at :05. Detail's untagged
@@ -2082,7 +2083,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
     await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'data')
     await expectNodeCardPingTooltip(page, 'latency', '12:00:02\n17 ms')
-    await expectNodeCardPingBucketState(page, 'latency', PING_PREVIOUS_BUCKET, 'pending')
+    await expectNodeCardPingBucketState(page, 'latency', PING_PREVIOUS_BUCKET, 'error')
     await expectNodeCardPingTooltip(page, 'latency', '加载失败')
 
     const selectedFailures = () => selectedPingMetricTimelineEntries(fixture.timeline)
@@ -2094,7 +2095,7 @@ test.describe('node-card per-node ping task bindings', () => {
 
     await fixture.advanceTime(45_000)
     await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'data')
-    await expectNodeCardPingBucketState(page, 'latency', PING_PREVIOUS_BUCKET, 'pending')
+    await expectNodeCardPingBucketState(page, 'latency', PING_PREVIOUS_BUCKET, 'error')
     const latencyStates = await primaryNodeCard(page)
       .locator('[data-node-ping-bars="latency"] [data-node-ping-bar]')
       .evaluateAll(elements => elements.map(element => element.getAttribute('data-node-ping-state')))
@@ -3108,7 +3109,7 @@ test.describe('node-card per-node ping task bindings', () => {
 
     const primaryRow = page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)
     await primaryRow.getByRole('button', { name: '单节点配置' }).click()
-    await page.getByTestId('ping-center-node-clear').click()
+    await page.getByTestId('ping-center-node-mode-inherit').click()
     await page.getByRole('dialog').getByRole('button', { name: '完成' }).click()
     await expect(primaryRow).toContainText('继承全局')
     await page.getByTestId('ping-center-global-slot-1').selectOption('101')
@@ -3142,7 +3143,7 @@ test.describe('node-card per-node ping task bindings', () => {
     const primaryRow = page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)
     await expect(primaryRow).toContainText('失效')
     await primaryRow.getByRole('button', { name: '单节点配置' }).click()
-    await page.getByTestId('ping-center-node-clear').click()
+    await page.getByTestId('ping-center-node-mode-inherit').click()
     await page.getByRole('dialog').getByRole('button', { name: '完成' }).click()
     await page.getByTestId('ping-center-global-slot-1').selectOption('101')
     await page.getByTestId('ping-center-save-preview').click()

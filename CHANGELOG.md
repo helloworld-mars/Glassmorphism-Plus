@@ -2,6 +2,20 @@
 
 本文件只记录 **Glassmorphism Plus** 自己的发行版本。原始 Glassmorphism 的版本历史请查看[上游仓库](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases)；Plus 的选择性同步记录见 [UPSTREAM.md](UPSTREAM.md)。
 
+## [2.2.0] - 2026-09-02
+
+### Changed
+
+- 首页 NodeCard Ping 延迟与丢包轨道统一为固定 20 格；mini、compact、comfortable、large 使用明确的固定高度、bucket gap 与行间距，数值、hover、focus 和 tooltip 不再改变几何。
+- 100% 丢包统一显示为 `延迟 -` 与唯一的 `丢包 100%`；延迟轨标记不可达，丢包轨显示完整红色 bucket，不制造 `0 ms` 或跨任务数据。
+- Ping 监控中心的三网监控开关改用标准 Switch 并移至全局配置右上区域，支持键盘和 ARIA；切换仍只修改草稿，关闭不删除任务 2／3 ID。
+- 单节点与批量继承流程移除重复的“恢复继承”入口；“继承全局”在完成后统一删除节点 override，取消编辑不会修改草稿。
+
+### Compatibility and performance
+
+- 继续使用既有 v3 配置、task identity、task-grouped Metric 查询、精确 pair fallback、缓存与单一 sample-aware scheduler；本版不新增生产依赖、Ping RPC、timer 或 subscriber。
+- 补充四种卡片尺寸、正常／高延迟／部分与完全丢包、等待／缺失／错误／失效、tooltip 几何、Switch 草稿与 reload、继承取消／保存失败及请求不回归测试。
+
 ## [2.1.0] - 2026-09-02
 
 ### Changed
@@ -108,6 +122,7 @@
 
 Git tags `1.0`、`1.1` 与 `1.2` 指向同一历史 commit。现有证据不足以为这三个 tag 分别重建独立、可靠的变更列表，因此这里只保留历史事实，不推测具体修复内容。
 
+[2.2.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v1.4.0...v2.0.0
 [1.4.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v1.3.6...v1.4.0

@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Empty } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { loadPublicPingTasks } from '@/services/metrics.service'
 import {
   invalidateNodeCardPingBindingAdminSession,
@@ -531,14 +532,6 @@ function applyBulkInherit(): void {
   if (!draftConfig.value || !selectedRows.value.length)
     return
   for (const row of selectedRows.value)
-    draftConfig.value.nodes[row.client.uuid] = { mode: 'inherit' }
-  markDraftChanged()
-}
-
-function restoreBulkInheritance(): void {
-  if (!draftConfig.value || !selectedRows.value.length)
-    return
-  for (const row of selectedRows.value)
     delete draftConfig.value.nodes[row.client.uuid]
   markDraftChanged()
 }
@@ -584,10 +577,6 @@ function setActiveMode(mode: 'inherit' | 'custom'): void {
     mode: 'custom',
     taskIds: cloneNodeCardPingTaskSlots(activeRow.value.resolution.configuredTaskSlots),
   }
-}
-
-function restoreActiveInheritance(): void {
-  activeEditorConfig.value = { mode: 'inherit' }
 }
 
 function setActiveTask(index: number, event: Event): void {
@@ -904,23 +893,24 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="mb-4 rounded-lg border border-border/60 bg-background/55 p-4" data-testid="ping-center-global-config">
-          <div class="grid gap-4 lg:grid-cols-[minmax(15rem,0.65fr)_minmax(0,1.35fr)]">
-            <div>
-              <div class="flex flex-wrap items-center gap-3">
-                <div>
-                  <h2 class="font-semibold">
-                    全局默认显示
-                  </h2><p class="mt-1 text-xs leading-5 text-muted-foreground">
-                    未单独配置的节点继承这里；关闭三网只隐藏任务 2、3，不会删除其编号。
-                  </p>
-                </div><button type="button" role="switch" :aria-checked="draftConfig.global.threeNetworkEnabled" class="ml-auto inline-flex items-center gap-2 rounded-full border border-border/70 px-3 py-1.5 text-sm" :class="draftConfig.global.threeNetworkEnabled ? 'bg-selection/15 text-selection' : 'bg-muted/40 text-muted-foreground'" data-testid="ping-center-three-network-switch" @click="setThreeNetworkEnabled(!draftConfig.global.threeNetworkEnabled)">
-                  <span class="relative h-5 w-9 rounded-full bg-muted"><span class="absolute top-0.5 size-4 rounded-full bg-current transition-transform" :class="draftConfig.global.threeNetworkEnabled ? 'translate-x-[18px]' : 'translate-x-0.5'" /></span>三网监控 {{ draftConfig.global.threeNetworkEnabled ? '已开启' : '已关闭' }}
-                </button>
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div class="min-w-0">
+              <h2 class="font-semibold">
+                全局默认显示
+              </h2><p class="mt-1 text-xs leading-5 text-muted-foreground">
+                未单独配置的节点继承这里；关闭三网只隐藏任务 2、3，不会删除其编号。
+              </p>
+            </div>
+            <div class="flex shrink-0 items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/25 px-3 py-2 sm:justify-end" data-testid="ping-center-three-network-control">
+              <div class="text-right">
+                <label for="ping-center-three-network-switch" class="block cursor-pointer text-sm font-medium" data-testid="ping-center-three-network-label">三网监控</label>
+                <span class="block text-xs text-muted-foreground" data-testid="ping-center-three-network-state">{{ draftConfig.global.threeNetworkEnabled ? '已开启' : '已关闭' }}</span>
               </div>
+              <Switch id="ping-center-three-network-switch" :model-value="draftConfig.global.threeNetworkEnabled" aria-label="三网监控" data-testid="ping-center-three-network-switch" @update:model-value="setThreeNetworkEnabled" />
             </div>
-            <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-              <label v-for="index in displayCount" :key="index" class="min-w-0 text-xs text-muted-foreground">探测任务 {{ index }}<select :value="draftConfig.global.taskIds[index - 1] ?? ''" class="mt-1 block h-10 w-full truncate rounded-md border border-input bg-background px-3 text-sm text-foreground" :data-testid="`ping-center-global-slot-${index}`" @change="setGlobalTask(index - 1, $event)"><option value="">请选择探测任务</option><option v-for="task in adminTasks" :key="task.id" :value="task.id" :disabled="draftConfig.global.taskIds.some((id, slot) => id === task.id && slot !== index - 1)">{{ taskOptionLabel(task) }}</option></select></label>
-            </div>
+          </div>
+          <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <label v-for="index in displayCount" :key="index" class="min-w-0 text-xs text-muted-foreground">探测任务 {{ index }}<select :value="draftConfig.global.taskIds[index - 1] ?? ''" class="mt-1 block h-10 w-full truncate rounded-md border border-input bg-background px-3 text-sm text-foreground" :data-testid="`ping-center-global-slot-${index}`" @change="setGlobalTask(index - 1, $event)"><option value="">请选择探测任务</option><option v-for="task in adminTasks" :key="task.id" :value="task.id" :disabled="draftConfig.global.taskIds.some((id, slot) => id === task.id && slot !== index - 1)">{{ taskOptionLabel(task) }}</option></select></label>
           </div>
           <div class="mt-4 flex flex-wrap gap-2 text-xs" aria-label="按覆盖状态筛选">
             <button v-for="coverage in (['full', 'partial', 'none', 'invalid'] as const)" :key="coverage" type="button" class="rounded-full border border-border/70 px-2.5 py-1 transition-colors" :class="[coverageClass(coverage), coverageFilter === coverage && 'bg-selection/15 ring-1 ring-selection']" :aria-pressed="coverageFilter === coverage" :data-testid="`ping-center-coverage-${coverage}`" @click="setCoverageFilter(coverage)">
@@ -958,8 +948,6 @@ onBeforeUnmount(() => {
               </div>
             </div><Button size="sm" variant="outline" data-testid="ping-center-bulk-inherit" @click="applyBulkInherit">
               批量继承全局
-            </Button><Button size="sm" variant="outline" data-testid="ping-center-bulk-clear" @click="restoreBulkInheritance">
-              恢复继承
             </Button><Button size="sm" variant="ghost" data-testid="ping-center-bulk-cancel" @click="cancelBulkSelection">
               取消选择
             </Button>
@@ -1034,8 +1022,6 @@ onBeforeUnmount(() => {
             继承全局
           </Button><Button size="sm" :variant="activeMode === 'custom' ? 'default' : 'ghost'" data-testid="ping-center-node-mode-custom" @click="setActiveMode('custom')">
             单独配置
-          </Button><Button size="sm" variant="ghost" data-testid="ping-center-node-clear" @click="restoreActiveInheritance">
-            恢复继承
           </Button>
         </div>
         <template v-if="activeCustomConfig">

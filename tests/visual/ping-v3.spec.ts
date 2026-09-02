@@ -1,3 +1,4 @@
+import type { Locator } from '@playwright/test'
 import type { NodeCardMultiPingConfig } from '../../src/utils/nodeCardMultiPingConfig'
 import type { NodeCardPingConfig } from '../../src/utils/nodeCardPingConfig'
 import { expect, test } from '@playwright/test'
@@ -35,6 +36,86 @@ function v3Config(value: Partial<NodeCardPingConfig> = {}): NodeCardPingConfig {
     ...value,
   }
 }
+
+async function readTaskStripGeometry(strip: Locator) {
+  return strip.evaluate((element) => {
+    const readRail = (metric: 'latency' | 'loss') => {
+      const rail = element.querySelector<HTMLElement>(`[data-node-ping-bars="${metric}"]`)
+      if (!rail)
+        throw new Error(`missing ${metric} rail`)
+      const railRect = rail.getBoundingClientRect()
+      const wrappers = Array.from(rail.querySelectorAll<HTMLElement>(':scope > [data-node-ping-bar]'))
+      return {
+        rect: { top: railRect.top, bottom: railRect.bottom, width: railRect.width, height: railRect.height },
+        gap: Number.parseFloat(getComputedStyle(rail).columnGap) || 0,
+        buckets: wrappers.map((wrapper) => {
+          const fill = wrapper.querySelector<HTMLElement>('[data-node-ping-bucket-fill]')
+          if (!fill)
+            throw new Error('missing bucket fill')
+          const wrapperRect = wrapper.getBoundingClientRect()
+          const fillRect = fill.getBoundingClientRect()
+          const style = getComputedStyle(fill)
+          return {
+            wrapper: { left: wrapperRect.left, right: wrapperRect.right, width: wrapperRect.width, height: wrapperRect.height },
+            fill: { left: fillRect.left, right: fillRect.right, width: fillRect.width, height: fillRect.height },
+            transform: style.transform,
+            margin: [style.marginTop, style.marginRight, style.marginBottom, style.marginLeft],
+            padding: [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft],
+            border: [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth],
+          }
+        }),
+      }
+    }
+    const latency = readRail('latency')
+    const loss = readRail('loss')
+    return {
+      latency,
+      loss,
+      rowGap: loss.rect.top - latency.rect.bottom,
+      cssRowGap: Number.parseFloat(getComputedStyle(element).getPropertyValue('--ping-row-gap')),
+      cssThickness: Number.parseFloat(getComputedStyle(element).getPropertyValue('--ping-bucket-height')),
+    }
+  })
+}
+
+function expectFixedRailGeometry(
+  geometry: Awaited<ReturnType<typeof readTaskStripGeometry>>,
+  expectedThickness: number,
+  expectedRowGap: number,
+  expectedBucketGap: number,
+): void {
+  expect(geometry.latency.buckets).toHaveLength(20)
+  expect(geometry.loss.buckets).toHaveLength(20)
+  expect(geometry.cssThickness).toBe(expectedThickness)
+  expect(geometry.latency.rect.height).toBeCloseTo(expectedThickness, 1)
+  expect(geometry.loss.rect.height).toBeCloseTo(expectedThickness, 1)
+  expect(geometry.latency.rect.width).toBeCloseTo(geometry.loss.rect.width, 1)
+  expect(geometry.rowGap).toBeCloseTo(expectedRowGap, 1)
+  expect(geometry.cssRowGap).toBe(expectedRowGap)
+  for (const rail of [geometry.latency, geometry.loss]) {
+    expect(rail.gap).toBeCloseTo(expectedBucketGap, 1)
+    const widths = rail.buckets.map(bucket => bucket.wrapper.width)
+    expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1.01)
+    for (const [index, bucket] of rail.buckets.entries()) {
+      expect(bucket.wrapper.height).toBeCloseTo(expectedThickness, 1)
+      expect(bucket.fill.width).toBeCloseTo(bucket.wrapper.width, 1)
+      expect(bucket.fill.height).toBeCloseTo(bucket.wrapper.height, 1)
+      expect(bucket.transform).toBe('none')
+      expect(bucket.margin).toEqual(['0px', '0px', '0px', '0px'])
+      expect(bucket.padding).toEqual(['0px', '0px', '0px', '0px'])
+      expect(bucket.border).toEqual(['0px', '0px', '0px', '0px'])
+      if (index > 0)
+        expect(bucket.wrapper.left - rail.buckets[index - 1]!.wrapper.right).toBeCloseTo(rail.gap, 1)
+    }
+  }
+}
+
+const NODE_CARD_PING_GEOMETRY = [
+  { size: 'mini', thickness: 3, rowGap: 3, bucketGap: 1 },
+  { size: 'compact', thickness: 4, rowGap: 3, bucketGap: 2 },
+  { size: 'comfortable', thickness: 5, rowGap: 4, bucketGap: 2 },
+  { size: 'large', thickness: 5, rowGap: 4, bucketGap: 2 },
+] as const
 
 test.describe('node-card Ping v3 configuration invariants', () => {
   test('strictly parses opaque v3 data, canonicalizes node order, and serializes idempotently', () => {
@@ -233,8 +314,8 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1)
   })
 
-  test('three-network switch hides and restores task 2/3 without a two-task control', async ({ page }) => {
-    await installKomariFixture(page, {
+  test('standard three-network switch updates one draft state, preserves slots, and persists only on save', async ({ page }) => {
+    const fixture = await installKomariFixture(page, {
       adminAccess: 'admin',
       nodeCount: 3,
       nodeCardPingDisplayConfigV3: serializeNodeCardPingConfig(v3Config()),
@@ -246,12 +327,43 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
     await expect(page.getByTestId('ping-center-global-slot-2')).toHaveValue('202')
     await expect(page.getByTestId('ping-center-global-slot-3')).toHaveValue('303')
     await expect(page.getByTestId('ping-center-global-count')).toHaveCount(0)
+    await expect(page.getByTestId('ping-center-three-network-state')).toHaveText('已开启')
+    expect(fixture.getThemeSaveCount()).toBe(0)
 
-    await toggle.click()
+    await page.getByTestId('ping-center-three-network-label').click()
     await expect(toggle).toHaveAttribute('aria-checked', 'false')
+    await expect(page.getByTestId('ping-center-three-network-state')).toHaveText('已关闭')
     await expect(page.getByTestId('ping-center-global-slot-2')).toHaveCount(0)
     await expect(page.getByTestId('ping-center-global-slot-3')).toHaveCount(0)
+    await expect(page.getByTestId('ping-center-current-state')).toContainText('有未保存修改')
+    expect(fixture.getThemeSaveCount()).toBe(0)
+
+    await page.getByTestId('ping-center-three-network-label').click()
+    await expect(toggle).toHaveAttribute('aria-checked', 'true')
+    await expect(page.getByTestId('ping-center-global-slot-2')).toHaveValue('202')
+    await expect(page.getByTestId('ping-center-global-slot-3')).toHaveValue('303')
+
+    await toggle.focus()
+    await toggle.press('Space')
+    await expect(toggle).toHaveAttribute('aria-checked', 'false')
+    await toggle.press('Enter')
+    await expect(toggle).toHaveAttribute('aria-checked', 'true')
     await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-checked', 'false')
+    expect(fixture.getThemeSaveCount()).toBe(0)
+
+    await page.getByTestId('ping-center-save-preview').click()
+    await page.getByTestId('ping-center-save-confirm').click()
+    await expect.poll(() => fixture.getThemeSaveCount()).toBe(1)
+    expect(inspectNodeCardPingConfig(fixture.getSavedThemeSettings().nodeCardPingDisplayConfigV3).config?.global).toEqual({
+      threeNetworkEnabled: false,
+      taskIds: [101, 202, 303],
+    })
+
+    await page.reload()
+    await expect(page.getByTestId('ping-center-three-network-switch')).toHaveAttribute('aria-checked', 'false')
+    await expect(page.getByTestId('ping-center-global-slot-2')).toHaveCount(0)
+    await page.getByTestId('ping-center-three-network-switch').click()
     await expect(page.getByTestId('ping-center-global-slot-2')).toHaveValue('202')
     await expect(page.getByTestId('ping-center-global-slot-3')).toHaveValue('303')
 
@@ -259,30 +371,218 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
     await expect(page.getByTestId('ping-center-node-count')).toHaveCount(0)
     await expect(page.getByTestId('ping-center-node-mode-inherit')).toContainText('继承全局')
     await expect(page.getByTestId('ping-center-node-mode-custom')).toContainText('单独配置')
-    await expect(page.getByTestId('ping-center-node-clear')).toContainText('恢复继承')
+    await expect(page.getByTestId('ping-center-node-editor')).not.toContainText('恢复继承')
+    await expect(page.getByTestId('ping-center-node-clear')).toHaveCount(0)
     await page.getByTestId('ping-center-node-mode-custom').click()
     await expect(page.getByTestId('ping-center-node-slot-1')).toBeVisible()
     await expect(page.getByTestId('ping-center-node-slot-2')).toBeVisible()
     await expect(page.getByTestId('ping-center-node-slot-3')).toBeVisible()
   })
 
-  test('100 percent loss shows no latency value or green latency rail', async ({ page }) => {
+  for (const geometryCase of NODE_CARD_PING_GEOMETRY) {
+    test(`${geometryCase.size} cards keep 20 fixed buckets across low and high values, hover, focus, and tooltip`, async ({ page, isMobile }) => {
+      await page.setViewportSize({ width: geometryCase.size === 'mini' ? 390 : 1440, height: 900 })
+      await installKomariFixture(page, {
+        hideEarth: true,
+        nodeCount: 3,
+        nodeCardSize: geometryCase.size,
+        nodeCardPingDisplayConfigV3: serializeNodeCardPingConfig(v3Config()),
+        nodeCardPingFixture: {
+          metric: 'valid',
+          legacy: 'valid',
+          sampleCount: 20,
+          thirdSharedTask: true,
+          task202Latency: 159,
+          task202Loss: 25,
+        },
+      })
+      await page.goto('/')
+      const card = page.locator(`[data-node-card-uuid="${PRIMARY_NODE_UUID}"]`)
+      const strips = card.locator('[data-node-ping-task-id]')
+      await expect(strips).toHaveCount(3)
+      expect(await strips.evaluateAll((elements, size) => elements.every(element => element.getAttribute('data-node-ping-size') === size), geometryCase.size)).toBe(true)
+
+      const lowValueStrip = card.locator('[data-node-ping-task-id="101"]')
+      const highValueStrip = card.locator('[data-node-ping-task-id="202"]')
+      await expect(highValueStrip).toHaveAttribute('data-node-ping-status', 'data')
+      const lowValueGeometry = await readTaskStripGeometry(lowValueStrip)
+      const highValueGeometry = await readTaskStripGeometry(highValueStrip)
+      expectFixedRailGeometry(lowValueGeometry, geometryCase.thickness, geometryCase.rowGap, geometryCase.bucketGap)
+      expectFixedRailGeometry(highValueGeometry, geometryCase.thickness, geometryCase.rowGap, geometryCase.bucketGap)
+      expect(highValueGeometry.latency.buckets[0]!.wrapper.width).toBeCloseTo(lowValueGeometry.latency.buckets[0]!.wrapper.width, 1)
+      expect(await highValueStrip.locator('[data-node-ping-bars="latency"] [data-node-ping-bucket-fill]').evaluateAll(elements => elements.some(element => element.className.includes('rose')))).toBe(true)
+
+      const bucket = highValueStrip.locator('[data-node-ping-bars="latency"] > [data-node-ping-bar]').nth(5)
+      const beforeInteraction = await readTaskStripGeometry(highValueStrip)
+      if (!isMobile) {
+        await bucket.hover()
+        await expect(bucket.getByRole('tooltip')).toBeVisible()
+        expectFixedRailGeometry(await readTaskStripGeometry(highValueStrip), geometryCase.thickness, geometryCase.rowGap, geometryCase.bucketGap)
+      }
+      await bucket.focus()
+      await expect(bucket.getByRole('tooltip')).toBeVisible()
+      expectFixedRailGeometry(await readTaskStripGeometry(highValueStrip), geometryCase.thickness, geometryCase.rowGap, geometryCase.bucketGap)
+      expect(await readTaskStripGeometry(highValueStrip)).toEqual(beforeInteraction)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1)
+    })
+  }
+
+  test('pending, missing, error, and invalid rails reuse the same fixed bucket DOM and geometry', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    const fixture = await installKomariFixture(page, {
+      hideEarth: true,
+      fakeTimers: true,
+      nodeCount: 3,
+      nodeCardSize: 'compact',
+      nodeCardPingDisplayConfigV3: serializeNodeCardPingConfig(v3Config({
+        nodes: { [PRIMARY_NODE_UUID]: { mode: 'custom', taskIds: [202, 999, 303] } },
+      })),
+      nodeCardPingFixture: { metric: 'valid', legacy: 'valid', sampleCount: 20, thirdSharedTask: true },
+    })
+    const releasePending = fixture.pausePingResponses()
+    await page.goto('/')
+    const card = page.locator(`[data-node-card-uuid="${PRIMARY_NODE_UUID}"]`)
+    const pendingStrip = card.locator('[data-node-ping-task-id="202"]')
+    await expect(pendingStrip).toHaveAttribute('data-node-ping-status', 'pending')
+    expectFixedRailGeometry(await readTaskStripGeometry(pendingStrip), 4, 3, 2)
+    const invalidStrip = card.locator('[data-node-ping-invalid-slot="2"]')
+    await expect(invalidStrip.locator('[data-node-ping-state="invalid"]')).toHaveCount(40)
+    expectFixedRailGeometry(await readTaskStripGeometry(invalidStrip), 4, 3, 2)
+
+    releasePending()
+    await expect(pendingStrip).toHaveAttribute('data-node-ping-status', 'data')
+    fixture.setNodeCardPingFixture({ metric: 'selected-empty', legacy: 'selected-empty' })
+    await page.reload()
+    await expect(pendingStrip.locator('[data-node-ping-state="confirmed-missing"]')).not.toHaveCount(0)
+    expectFixedRailGeometry(await readTaskStripGeometry(pendingStrip), 4, 3, 2)
+
+    fixture.setNodeCardPingFixture({ metric: 'error', legacy: 'error' })
+    await page.reload()
+    await expect(pendingStrip.locator('[data-node-ping-state="error"]')).toHaveCount(40)
+    expectFixedRailGeometry(await readTaskStripGeometry(pendingStrip), 4, 3, 2)
+  })
+
+  test('tooltip, focus, responsive resize, and theme styling do not trigger extra Ping RPCs', async ({ page, isMobile }) => {
+    const pingRequests: string[] = []
+    page.on('request', (request) => {
+      const body = request.postData() ?? ''
+      if (request.url().includes('/api/rpc2') && (/ping\.|PingMetric|PingRecords/u).test(body))
+        pingRequests.push(body)
+    })
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await installKomariFixture(page, {
+      hideEarth: true,
+      nodeCount: 12,
+      nodeCardSize: 'compact',
+      nodeCardPingDisplayConfigV3: serializeNodeCardPingConfig(v3Config()),
+      nodeCardPingFixture: { metric: 'valid', legacy: 'valid', sampleCount: 20, thirdSharedTask: true },
+    })
+    await page.goto('/')
+    const strips = page.locator('[data-node-ping-task-id]')
+    await expect(strips).toHaveCount(36)
+    await expect(page.locator('[data-node-ping-status="data"]')).toHaveCount(36)
+    expect(pingRequests.length).toBeGreaterThan(0)
+    const requestBaseline = pingRequests.length
+
+    const bucket = strips.first().locator('[data-node-ping-bars="latency"] > [data-node-ping-bar]').nth(4)
+    if (!isMobile) {
+      await bucket.hover()
+      await expect(bucket.getByRole('tooltip')).toBeVisible()
+    }
+    await bucket.focus()
+    await expect(bucket.getByRole('tooltip')).toBeVisible()
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.evaluate(() => document.documentElement.classList.toggle('dark'))
+    await page.waitForTimeout(250)
+    expect(pingRequests).toHaveLength(requestBaseline)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1)
+  })
+
+  test('inherit mode is cancel-safe, deletes the override only on completion, survives reload, and rejects failed saves', async ({ page }) => {
+    const initialConfig = v3Config({
+      nodes: {
+        [PRIMARY_NODE_UUID]: { mode: 'custom', taskIds: [101, 202, 303] },
+        [NODE_2]: { mode: 'custom', taskIds: [101, 202, 303] },
+      },
+    })
+    const fixture = await installKomariFixture(page, {
+      adminAccess: 'admin',
+      nodeCount: 3,
+      nodeCardPingDisplayConfigV3: serializeNodeCardPingConfig(initialConfig),
+      nodeCardPingFixture: { metric: 'valid', thirdSharedTask: true },
+    })
+    await page.goto('/?view=pingsettings&pingtab=config')
+    const primaryRow = page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)
+    await primaryRow.getByRole('button', { name: '单节点配置' }).click()
+    await page.getByTestId('ping-center-node-mode-inherit').click()
+    await page.getByTestId('ping-center-node-editor').getByRole('button', { name: '取消', exact: true }).click()
+    await expect(primaryRow).toContainText('单独配置')
+    expect(fixture.getThemeSaveCount()).toBe(0)
+
+    await primaryRow.getByRole('button', { name: '单节点配置' }).click()
+    await page.getByTestId('ping-center-node-mode-inherit').click()
+    await expect(page.getByTestId('ping-center-node-slot-1')).toHaveCount(0)
+    await page.getByTestId('ping-center-node-complete').click()
+    await expect(primaryRow).toContainText('继承全局')
+    expect(fixture.getThemeSaveCount()).toBe(0)
+    await page.getByTestId('ping-center-save-preview').click()
+    await page.getByTestId('ping-center-save-confirm').click()
+    await expect.poll(() => fixture.getThemeSaveCount()).toBe(1)
+    expect(inspectNodeCardPingConfig(fixture.getSavedThemeSettings().nodeCardPingDisplayConfigV3).config?.nodes[PRIMARY_NODE_UUID]).toBeUndefined()
+    await page.reload()
+    await expect(page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)).toContainText('继承全局')
+
+    const secondRow = page.getByTestId(`node-binding-row-${NODE_2}`)
+    await secondRow.getByRole('button', { name: '单节点配置' }).click()
+    await page.getByTestId('ping-center-node-mode-inherit').click()
+    await page.getByTestId('ping-center-node-complete').click()
+    await page.getByTestId('ping-center-save-preview').click()
+    fixture.setAdminAccess('forbidden')
+    await page.getByTestId('ping-center-save-confirm').click()
+    await expect(page.getByTestId('node-ping-binding-forbidden')).toBeVisible()
+    expect(fixture.getThemeSaveCount()).toBe(1)
+    expect(inspectNodeCardPingConfig(fixture.getSavedThemeSettings().nodeCardPingDisplayConfigV3).config?.nodes[NODE_2]?.mode).toBe('custom')
+  })
+
+  test('100 percent loss shows one explicit loss value with unreachable latency and fixed rails', async ({ page }) => {
     await installKomariFixture(page, {
       hideEarth: true,
       nodeCount: 3,
       nodeCardPingDisplayConfigV3: serializeNodeCardPingConfig(v3Config({
         global: { threeNetworkEnabled: false, taskIds: [202, null, null] },
       })),
-      nodeCardPingFixture: { metric: 'valid', legacy: 'valid', task202Latency: 200, task202Loss: 100 },
+      nodeCardPingFixture: {
+        metric: 'valid',
+        legacy: 'valid',
+        task202Latency: null,
+        task202Loss: 100,
+        metricSamples: Array.from({ length: 20 }, (_, index) => ({
+          time: Date.parse('2026-07-25T11:04:30.000Z') + index * 180_000,
+          latency: null,
+          loss: 1,
+          latencyCount: 0,
+          lossCount: 1,
+          taskId: 202,
+        })),
+      },
     })
     await page.goto('/')
     const strip = page.locator(`[data-node-card-uuid="${PRIMARY_NODE_UUID}"] [data-node-ping-task-id="202"]`)
     await expect(strip).toHaveAttribute('data-node-ping-status', 'data')
-    await expect(strip).toContainText('100% 丢包')
-    await expect(strip).toContainText('-')
-    const latencyBars = strip.locator('[data-node-ping-trend="latency"] > span:last-child > span')
+    await expect(strip.locator('[data-node-ping-summary="latency"]')).toHaveText('延迟 -')
+    await expect(strip.locator('[data-node-ping-summary="loss"]')).toHaveText('丢包 100%')
+    await expect(strip.getByText('100% 丢包', { exact: true })).toHaveCount(0)
+    await expect(strip.locator('.node-card-ping-task-header > span.text-destructive')).toHaveCount(1)
+    const latencyBars = strip.locator('[data-node-ping-bars="latency"] > [data-node-ping-bar]')
+    const lossBars = strip.locator('[data-node-ping-bars="loss"] > [data-node-ping-bar]')
     await expect(latencyBars).toHaveCount(20)
-    expect(await latencyBars.evaluateAll(elements => elements.some(element => element.className.includes('emerald')))).toBe(false)
+    await expect(lossBars).toHaveCount(20)
+    expect(await latencyBars.evaluateAll(elements => elements.every(element => element.getAttribute('data-node-ping-state') === 'unreachable'))).toBe(true)
+    expect(await latencyBars.locator('[data-node-ping-bucket-fill]').evaluateAll(elements => elements.some(element => element.className.includes('emerald')))).toBe(false)
+    expect(await lossBars.evaluateAll(elements => elements.every(element => element.getAttribute('data-node-ping-state') === 'data'))).toBe(true)
+    expect(await lossBars.locator('[data-node-ping-bucket-fill]').evaluateAll(elements => elements.every(element => element.className.includes('rose')))).toBe(true)
+    const geometry = await readTaskStripGeometry(strip)
+    expectFixedRailGeometry(geometry, 4, 3, 2)
   })
 
   test('keeps mixed full, partial, and invalid triple-mode cards equal height', async ({ page }) => {

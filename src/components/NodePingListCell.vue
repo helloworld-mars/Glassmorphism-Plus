@@ -121,7 +121,7 @@ const lossDisplay = computed(() => {
           :aria-label="bar.tooltip"
           class="h-full w-full"
         >
-          <span class="block h-full w-full rounded-[1px] transition-all group-hover:opacity-50 hover:scale-y-160 hover:opacity-100" :class="bar.className" />
+          <span class="block h-full w-full rounded-[1px] transition-[filter,opacity] group-hover:opacity-50 hover:brightness-125 hover:opacity-100" :class="bar.className" />
         </span>
       </div>
     </div>
@@ -137,7 +137,7 @@ const lossDisplay = computed(() => {
           :aria-label="bar.tooltip"
           class="h-full w-full"
         >
-          <span class="block h-full w-full rounded-[1px] transition-all group-hover:opacity-50 hover:scale-y-160 hover:opacity-100" :class="bar.className" />
+          <span class="block h-full w-full rounded-[1px] transition-[filter,opacity] group-hover:opacity-50 hover:brightness-125 hover:opacity-100" :class="bar.className" />
         </span>
       </div>
     </div>
