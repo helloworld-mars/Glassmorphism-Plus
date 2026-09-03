@@ -743,6 +743,12 @@ header {
   background-color: transparent;
 }
 
+.node-card-ping-bucket-hitbox[data-node-ping-state='pending'] {
+  pointer-events: none;
+  opacity: 0;
+  user-select: none;
+}
+
 .node-card-ping-bucket-hitbox[data-node-ping-severity='excellent'] > .node-card-ping-bucket-fill {
   background-color: var(--ping-latency-excellent);
 }
@@ -816,6 +822,59 @@ header {
 .node-card-ping-bucket-hitbox:focus-visible {
   outline-width: 1px;
   outline-color: var(--color-ring);
+}
+
+/* ===== Finance dialog mobile viewport ===== */
+
+@media (max-width: 639px), (max-width: 932px) and (max-height: 500px) {
+  .finance-details-dialog {
+    --tw-translate-x: 0px !important;
+    --tw-translate-y: 0px !important;
+
+    inset: max(env(safe-area-inset-top), 0px) max(env(safe-area-inset-right), 0px) max(env(safe-area-inset-bottom), 0px)
+      max(env(safe-area-inset-left), 0px) !important;
+    width: auto !important;
+    max-width: none !important;
+    height: calc(100svh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-height: none !important;
+    translate: none !important;
+    transform: none !important;
+    border-radius: 0;
+  }
+
+  .finance-details-dialog [data-app-dialog-header] {
+    position: sticky;
+    z-index: 2;
+    top: 0;
+    flex: 0 0 auto;
+    padding-top: max(0.75rem, env(safe-area-inset-top));
+    background: color-mix(in srgb, var(--color-card) 94%, transparent);
+    backdrop-filter: blur(18px) saturate(150%);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+  }
+
+  .finance-details-dialog [data-app-dialog-body] {
+    overflow-x: hidden;
+    padding: 0.75rem;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+    scroll-padding-top: 0.75rem;
+    scroll-padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+  }
+
+  .finance-details-content,
+  .finance-details-content [data-slot='tabs-content'] {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .finance-details-dialog [data-finance-desktop-table] {
+    display: none !important;
+  }
+
+  .finance-details-dialog [data-finance-mobile-list] {
+    display: block !important;
+  }
 }
 
 /* Firefox composites many backdrop-filter layers less efficiently than Chromium.

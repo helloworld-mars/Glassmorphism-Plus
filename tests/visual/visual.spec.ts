@@ -39,14 +39,14 @@ test('Plus documentation keeps its own version identity and preserves upstream a
 
   expect(readme).toContain('# 🌌 Komari Glassmorphism Plus')
   expect(readme).toContain('当前 Plus 版本')
-  expect(readme).toContain('**v2.3.1**')
+  expect(readme).toContain('**v2.5.0**')
   expect(readme).toContain('sanrokamlan Glassmorphism v3.3.7')
-  expect(readme).toContain('Glassmorphism-Plus-release-2.3.1.zip')
+  expect(readme).toContain('Glassmorphism-Plus-release-2.5.0.zip')
   expect(readme).toContain('Source code (zip)')
   expect(readme).not.toMatch(/^#{2,}\s+(?:\S.*)?v3\.\d/m)
 
   const changelogVersions = Array.from(changelog.matchAll(/^## \[([^\]]+)\]/gm), match => match[1])
-  expect(changelogVersions).toEqual(['2.3.1', '2.3.0', '2.2.0', '2.1.0', '2.0.0', '1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
+  expect(changelogVersions).toEqual(['2.5.0', '2.3.1', '2.3.0', '2.2.0', '2.1.0', '2.0.0', '1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
   expect(upstream).toContain('Current upstream baseline')
   expect(upstream).toContain('v3.3.7')
   expect(credits).toContain('helloworld-mars')
@@ -394,6 +394,99 @@ test('Ping timestamps use one strict [start, end) twenty-bucket contract', () =>
   }
   expect(getPingTimeBucketIndex(end - 1, window)).toBe(19)
   expect(getPingTimeBucketIndex(end, window)).toBeNull()
+})
+
+test('v2.5.0 maps real samples into one fixed 09:09–10:09 three-minute window', () => {
+  const start = Date.parse('2026-09-03T09:09:00+08:00')
+  const end = Date.parse('2026-09-03T10:09:00+08:00')
+  const window = createPingTimeWindow(start, end, 20)
+  expect(window).not.toBeNull()
+  if (!window)
+    return
+
+  const samples = [
+    ['2026-09-03T09:58:00+08:00', 16],
+    ['2026-09-03T10:02:00+08:00', 17],
+    ['2026-09-03T10:05:00+08:00', 18],
+    ['2026-09-03T10:07:00+08:00', 19],
+  ] as const
+  for (const [time, index] of samples)
+    expect(getPingTimeBucketIndex(Date.parse(time), window)).toBe(index)
+
+  expect(Array.from({ length: 6 }, (_, offset) => {
+    const index = 14 + offset
+    return [
+      new Date(window.start + index * window.bucketWidth).toISOString(),
+      new Date(window.start + (index + 1) * window.bucketWidth).toISOString(),
+    ]
+  })).toEqual([
+    ['2026-09-03T01:51:00.000Z', '2026-09-03T01:54:00.000Z'],
+    ['2026-09-03T01:54:00.000Z', '2026-09-03T01:57:00.000Z'],
+    ['2026-09-03T01:57:00.000Z', '2026-09-03T02:00:00.000Z'],
+    ['2026-09-03T02:00:00.000Z', '2026-09-03T02:03:00.000Z'],
+    ['2026-09-03T02:03:00.000Z', '2026-09-03T02:06:00.000Z'],
+    ['2026-09-03T02:06:00.000Z', '2026-09-03T02:09:00.000Z'],
+  ])
+  expect(getPingTimeBucketIndex(end, window)).toBeNull()
+})
+
+test('v2.5.0 sorts and deduplicates out-of-order Ping samples without crossing task, node, or window identity', () => {
+  const start = Date.parse('2026-09-03T09:09:00+08:00')
+  const end = Date.parse('2026-09-03T10:09:00+08:00')
+  const tags = { task_id: '22', task_name: 'Guangdong Telecom' }
+  const samples = normalizePingMetricSamples([
+    {
+      metric_key: 'ping.latency_ms',
+      entity_id: PRIMARY_NODE_UUID,
+      tags,
+      points: [
+        { time: '2026-09-03T10:05:00+08:00', value: 9, count: 1 },
+        { time: '2026-09-03T09:58:00+08:00', value: 8, count: 1 },
+        { time: '2026-09-03T10:02:00+08:00', value: 7, count: 1 },
+        { time: '2026-09-03T10:02:00+08:00', value: 8, count: 1 },
+        { time: '2026-09-03T10:07:00+08:00', value: 9, count: 1 },
+        { time: '2026-09-03T10:09:00+08:00', value: 99, count: 1 },
+      ],
+    },
+    {
+      metric_key: 'ping.loss',
+      entity_id: PRIMARY_NODE_UUID,
+      tags,
+      points: [
+        { time: '2026-09-03T10:07:00+08:00', value: 0, count: 1 },
+        { time: '2026-09-03T10:02:00+08:00', value: 0.1, count: 1 },
+        { time: '2026-09-03T09:58:00+08:00', value: 1 / 3, count: 1 },
+        { time: '2026-09-03T10:02:00+08:00', value: 0, count: 1 },
+        { time: '2026-09-03T10:05:00+08:00', value: 0, count: 1 },
+      ],
+    },
+    {
+      metric_key: 'ping.latency_ms',
+      entity_id: PRIMARY_NODE_UUID,
+      tags: { task_id: '23' },
+      points: [{ time: '2026-09-03T10:02:00+08:00', value: 123, count: 1 }],
+    },
+    {
+      metric_key: 'ping.latency_ms',
+      entity_id: '00000000-0000-4000-8000-999999999999',
+      tags,
+      points: [{ time: '2026-09-03T10:02:00+08:00', value: 456, count: 1 }],
+    },
+  ], { entityId: PRIMARY_NODE_UUID, taskId: '22', start, end })
+
+  expect(samples.map(sample => sample.time)).toEqual([
+    '2026-09-03T01:58:00.000Z',
+    '2026-09-03T02:02:00.000Z',
+    '2026-09-03T02:05:00.000Z',
+    '2026-09-03T02:07:00.000Z',
+  ])
+  expect(samples.map(sample => [sample.latency, sample.loss])).toEqual([
+    [8, 1 / 3],
+    [8, 0],
+    [9, 0],
+    [9, 0],
+  ])
+  expect(new Set(samples.map(sample => sample.timestamp)).size).toBe(samples.length)
 })
 
 test('Ping task displays retain the raw public task order instead of weight or numeric ID order', () => {
@@ -994,13 +1087,13 @@ test('brand metadata and homepage footer retain current and original attribution
     name: 'Komari Glassmorphism Plus',
     short: 'glassmorphism-plus',
     description: 'A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.',
-    version: '2.3.1',
+    version: '2.5.0',
     author: 'helloworld-mars',
     url: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(packageMetadata).toMatchObject({
     name: 'komari-theme-glassmorphism-plus',
-    version: '2.3.1',
+    version: '2.5.0',
     homepage: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(themeManifest.short).toMatch(/^[\w-]+$/)
@@ -1044,7 +1137,7 @@ test('brand metadata and homepage footer retain current and original attribution
 
   const footer = page.locator('footer')
   await expect(footer.getByRole('link', { name: 'Glassmorphism Plus' })).toHaveAttribute('href', 'https://github.com/helloworld-mars/Glassmorphism-Plus')
-  await expect(footer.getByText('v2.3.1 · helloworld-mars', { exact: true }).first()).toBeVisible()
+  await expect(footer.getByText('v2.5.0 · helloworld-mars', { exact: true }).first()).toBeVisible()
   await expect(footer.getByRole('link', { name: 'Based on the original theme by sanrokamlan' }))
     .toHaveAttribute('href', 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism')
   await expect(footer).not.toContainText('unknown')
@@ -1270,7 +1363,7 @@ test('free node pricing stays semantic across home, finance, and detail', async 
   await page.getByRole('button', { name: '查看剩余价值明细' }).click()
   const financeDialog = page.getByRole('dialog', { name: '价值与费用明细' })
   await expect(financeDialog.getByText(freeNodeName, { exact: true })).toHaveCount(0)
-  await financeDialog.getByLabel('排除免费节点').uncheck()
+  await financeDialog.getByRole('switch', { name: '排除免费节点' }).click()
   const freeNodeRow = financeDialog.getByRole('cell', { name: freeNodeName, exact: true }).locator('..')
   await expect(freeNodeRow).toBeVisible()
   await expect(freeNodeRow.getByText('免费', { exact: true })).toBeVisible()
@@ -1283,6 +1376,122 @@ test('free node pricing stays semantic across home, finance, and detail', async 
   await expect(page.getByText('无', { exact: true })).toBeVisible()
   await expect(page.getByText('免费 / 月', { exact: true })).toHaveCount(0)
 })
+
+for (const viewport of [
+  { width: 390, height: 844 },
+  { width: 393, height: 852 },
+  { width: 430, height: 932 },
+  { width: 375, height: 667 },
+  { width: 360, height: 800 },
+  { width: 844, height: 390 },
+]) {
+  test(`v2.5.0 finance dialog fits ${viewport.width}x${viewport.height} and restores body lock`, async ({ page }) => {
+    await page.setViewportSize(viewport)
+    await installKomariFixture(page, { dark: true, hideEarth: true })
+    await openStablePage(page)
+
+    const originalBodyStyle = await page.evaluate(() => ({
+      overflow: document.body.style.overflow,
+      pointerEvents: document.body.style.pointerEvents,
+      paddingRight: document.body.style.paddingRight,
+      marginRight: document.body.style.marginRight,
+    }))
+    await page.getByRole('button', { name: '查看剩余价值明细' }).click()
+    const dialog = page.getByRole('dialog', { name: '价值与费用明细' })
+    const header = dialog.locator('[data-app-dialog-header]')
+    const body = dialog.locator('[data-app-dialog-body]')
+    await expect(dialog).toBeVisible()
+    await expect(header).toBeVisible()
+    await expect(dialog.locator('[data-finance-mobile-list]')).toBeVisible()
+    await expect(dialog.locator('[data-finance-desktop-table]')).toBeHidden()
+    await expect(dialog.getByRole('switch', { name: '排除免费节点' })).toBeVisible()
+
+    const layout = await dialog.evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      const scrollBody = element.querySelector<HTMLElement>('[data-app-dialog-body]')!
+      const controls = element.querySelector<HTMLElement>('[data-finance-controls]')!
+      const summary = element.querySelector<HTMLElement>('[data-finance-summary]')!
+      const within = (child: DOMRect) => child.left >= rect.left - 1 && child.right <= rect.right + 1
+      return {
+        rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height },
+        bodyScrollWidth: scrollBody.scrollWidth,
+        bodyClientWidth: scrollBody.clientWidth,
+        bodyScrollHeight: scrollBody.scrollHeight,
+        bodyClientHeight: scrollBody.clientHeight,
+        controlsContained: within(controls.getBoundingClientRect()),
+        summaryContained: within(summary.getBoundingClientRect()),
+        documentContained: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      }
+    })
+    expect(layout.rect.left).toBeGreaterThanOrEqual(-1)
+    expect(layout.rect.top).toBeGreaterThanOrEqual(-1)
+    expect(layout.rect.right).toBeLessThanOrEqual(viewport.width + 1)
+    expect(layout.rect.bottom).toBeLessThanOrEqual(viewport.height + 1)
+    expect(layout.rect.width).toBeGreaterThanOrEqual(viewport.width - 2)
+    expect(layout.rect.height).toBeGreaterThanOrEqual(viewport.height - 2)
+    expect(layout.bodyScrollWidth).toBeLessThanOrEqual(layout.bodyClientWidth)
+    expect(layout.bodyScrollHeight).toBeGreaterThan(layout.bodyClientHeight)
+    expect(layout.controlsContained).toBe(true)
+    expect(layout.summaryContained).toBe(true)
+    expect(layout.documentContained).toBe(true)
+
+    const headerBefore = await header.boundingBox()
+    await body.evaluate(element => element.scrollTo(0, element.scrollHeight))
+    const headerAfter = await header.boundingBox()
+    expect(headerBefore?.y).toBe(headerAfter?.y)
+    await dialog.getByRole('tab', { name: '按量估算' }).click()
+    await expect(dialog.getByLabel('估算节点')).toBeVisible()
+    await dialog.getByRole('tab', { name: '汇率设置' }).click()
+    await expect(dialog.getByRole('button', { name: /恢复今日汇率/ })).toBeVisible()
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+
+    await dialog.getByRole('button', { name: '关闭' }).click()
+    await expect(dialog).toHaveCount(0)
+    await expect.poll(() => page.evaluate(() => ({
+      overflow: document.body.style.overflow,
+      pointerEvents: document.body.style.pointerEvents,
+      paddingRight: document.body.style.paddingRight,
+      marginRight: document.body.style.marginRight,
+    }))).toEqual(originalBodyStyle)
+    await page.getByRole('button', { name: '查看剩余价值明细' }).click()
+    await expect(page.getByRole('dialog', { name: '价值与费用明细' })).toBeVisible()
+    await page.getByRole('dialog', { name: '价值与费用明细' }).getByRole('button', { name: '关闭' }).click()
+    await expect.poll(() => page.evaluate(() => ({
+      overflow: document.body.style.overflow,
+      pointerEvents: document.body.style.pointerEvents,
+      paddingRight: document.body.style.paddingRight,
+      marginRight: document.body.style.marginRight,
+    }))).toEqual(originalBodyStyle)
+  })
+}
+
+for (const width of [1280, 1440, 1920]) {
+  test(`v2.5.0 finance dialog preserves the desktop table at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await installKomariFixture(page, { hideEarth: true })
+    await openStablePage(page)
+    await page.getByRole('button', { name: '查看剩余价值明细' }).click()
+    const dialog = page.getByRole('dialog', { name: '价值与费用明细' })
+    await expect(dialog.locator('[data-finance-desktop-table]')).toBeVisible()
+    await expect(dialog.locator('[data-finance-mobile-list]')).toBeHidden()
+    const layout = await dialog.evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      const body = element.querySelector<HTMLElement>('[data-app-dialog-body]')!
+      return {
+        width: rect.width,
+        left: rect.left,
+        right: rect.right,
+        bodyContained: body.scrollWidth <= body.clientWidth,
+        documentContained: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      }
+    })
+    expect(layout.width).toBeLessThan(width)
+    expect(layout.left).toBeGreaterThan(0)
+    expect(layout.right).toBeLessThan(width)
+    expect(layout.bodyContained).toBe(true)
+    expect(layout.documentContained).toBe(true)
+  })
+}
 
 test('detail light desktop', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
@@ -1571,6 +1780,59 @@ function isPingLegacyRequest(call: { method: string, params: Record<string, unkn
 }
 
 test.describe('node-card per-node ping task bindings', () => {
+  test('v2.5.0 exposes fixed bucket bounds separately from raw sample timestamps', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    await installKomariFixture(page, {
+      fakeTimers: true,
+      clockNow: '2026-09-03T10:08:30.000+08:00',
+      nodeCardPingTaskBindings: primaryBinding(202),
+      nodeCardPingFixture: {
+        metric: 'valid',
+        sampleSchedule: [
+          { sampleAt: '2026-09-03T09:58:00.000+08:00', apiVisibleAt: '2026-09-03T09:58:00.000+08:00', latency: 8, loss: 33.3 },
+          { sampleAt: '2026-09-03T10:02:00.000+08:00', apiVisibleAt: '2026-09-03T10:02:00.000+08:00', latency: 8, loss: 0 },
+          { sampleAt: '2026-09-03T10:05:00.000+08:00', apiVisibleAt: '2026-09-03T10:05:00.000+08:00', latency: 9, loss: 0 },
+          { sampleAt: '2026-09-03T10:07:00.000+08:00', apiVisibleAt: '2026-09-03T10:07:00.000+08:00', latency: 9, loss: 0 },
+        ],
+      },
+    })
+    await openStablePage(page)
+
+    const strip = primaryNodeCard(page).locator('[data-node-ping-task-id="202"]')
+    await expect(strip).toHaveAttribute('data-node-ping-node-uuid', PRIMARY_NODE_UUID)
+    await expect(strip).toHaveAttribute('data-node-ping-window-start', '2026-09-03T01:09:00.000Z')
+    await expect(strip).toHaveAttribute('data-node-ping-window-end', '2026-09-03T02:09:00.000Z')
+    const fetchedAt = Date.parse(await strip.getAttribute('data-node-ping-fetched-at') ?? '')
+    expect(fetchedAt).toBeGreaterThanOrEqual(Date.parse('2026-09-03T02:08:30.000Z'))
+    expect(fetchedAt).toBeLessThan(Date.parse('2026-09-03T02:09:00.000Z'))
+
+    const rightmost = await strip
+      .locator('[data-node-ping-bars="latency"] [data-node-ping-bar]')
+      .evaluateAll(elements => elements.slice(-6).map(element => ({
+        start: element.getAttribute('data-node-ping-bucket-start'),
+        end: element.getAttribute('data-node-ping-bucket-end'),
+        sample: element.getAttribute('data-node-ping-sample-time'),
+        state: element.getAttribute('data-node-ping-state'),
+      })))
+    expect(rightmost).toEqual([
+      { start: '2026-09-03T01:51:00.000Z', end: '2026-09-03T01:54:00.000Z', sample: null, state: 'confirmed-missing' },
+      { start: '2026-09-03T01:54:00.000Z', end: '2026-09-03T01:57:00.000Z', sample: null, state: 'confirmed-missing' },
+      { start: '2026-09-03T01:57:00.000Z', end: '2026-09-03T02:00:00.000Z', sample: '2026-09-03T01:58:00.000Z', state: 'data' },
+      { start: '2026-09-03T02:00:00.000Z', end: '2026-09-03T02:03:00.000Z', sample: '2026-09-03T02:02:00.000Z', state: 'data' },
+      { start: '2026-09-03T02:03:00.000Z', end: '2026-09-03T02:06:00.000Z', sample: '2026-09-03T02:05:00.000Z', state: 'data' },
+      { start: '2026-09-03T02:06:00.000Z', end: '2026-09-03T02:09:00.000Z', sample: '2026-09-03T02:07:00.000Z', state: 'data' },
+    ])
+
+    const bucket = nodeCardPingBucket(page, 'latency', '2026-09-03T01:57:00.000Z')
+    await bucket.hover()
+    const tooltip = page.locator('[data-slot="data-tooltip-content"]')
+    await expect(tooltip).toContainText('09:57–10:00')
+    await expect(tooltip).toContainText('最新样本')
+    await expect(tooltip).toContainText('09:58:00')
+    await expect(tooltip).toContainText('8 ms')
+    await expect(tooltip).toContainText('33.3%')
+  })
+
   test('keeps an exact selected-task snapshot visible throughout the home-to-detail leave transition', async ({ page }) => {
     const selectedTaskQueries: Array<Record<string, unknown>> = []
     page.on('request', (request) => {
@@ -1673,6 +1935,57 @@ test.describe('node-card per-node ping task bindings', () => {
     expect(calls.filter(call => call.method === 'public:getPingMetricStats'
       && call.params.task_id === undefined)).toHaveLength(0)
     expect(calls.filter(call => call.method === 'public:queryMetrics' && isPingMetricQuery(call.params) && !(call.params.tags as Record<string, unknown> | undefined)?.task_id)).toHaveLength(0)
+    expect(calls.filter(isPingLegacyRequest)).toHaveLength(0)
+  })
+
+  test('v2.5.0 keeps 12 nodes and three tasks on common bucket boundaries without request fan-out', async ({ page }) => {
+    const calls: Array<{ method: string, params: Record<string, unknown> }> = []
+    page.on('request', (request) => {
+      if (!isRpc2Request(request.url()))
+        return
+      const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
+      if (payload?.method)
+        calls.push({ method: payload.method, params: payload.params ?? {} })
+    })
+
+    await page.setViewportSize({ width: 1920, height: 1080 })
+    await installKomariFixture(page, {
+      clockNow: '2026-09-03T10:08:30.000+08:00',
+      nodeCardPingDisplayConfigV3: v3GlobalPingConfig(true),
+      nodeCardPingFixture: {
+        metric: 'valid',
+        thirdSharedTask: true,
+        sampleTimes: [
+          '2026-09-03T09:58:00.000+08:00',
+          '2026-09-03T10:02:00.000+08:00',
+          '2026-09-03T10:05:00.000+08:00',
+          '2026-09-03T10:07:00.000+08:00',
+        ],
+      },
+    })
+    await openStablePage(page)
+
+    const strips = page.locator('[data-node-card-uuid] [data-node-ping-task-id]')
+    await expect(strips).toHaveCount(36)
+    await expect(page.locator('[data-node-card-uuid] [data-node-ping-bars="latency"] [data-node-ping-bar]')).toHaveCount(36 * 20)
+    await expect(page.locator('[data-node-card-uuid] [data-node-ping-bars="loss"] [data-node-ping-bar]')).toHaveCount(36 * 20)
+    const stripIdentity = await strips.evaluateAll(elements => elements.map(element => ({
+      nodeUuid: element.getAttribute('data-node-ping-node-uuid'),
+      taskId: element.getAttribute('data-node-ping-task-id'),
+      start: element.getAttribute('data-node-ping-window-start'),
+      end: element.getAttribute('data-node-ping-window-end'),
+    })))
+    expect(new Set(stripIdentity.map(item => item.nodeUuid)).size).toBe(12)
+    expect(new Set(stripIdentity.map(item => item.taskId))).toEqual(new Set(['101', '202', '303']))
+    expect(new Set(stripIdentity.map(item => item.start))).toEqual(new Set(['2026-09-03T01:09:00.000Z']))
+    expect(new Set(stripIdentity.map(item => item.end))).toEqual(new Set(['2026-09-03T02:09:00.000Z']))
+
+    const statsCalls = calls.filter(call => call.method === 'public:getPingMetricStats'
+      && ['101', '202', '303'].includes(String(call.params.task_id)))
+    const seriesCalls = calls.filter(call => call.method === 'public:queryMetrics'
+      && ['101', '202', '303'].includes(String((call.params.tags as Record<string, unknown> | undefined)?.task_id)))
+    expect(statsCalls).toHaveLength(6)
+    expect(seriesCalls).toHaveLength(6)
     expect(calls.filter(isPingLegacyRequest)).toHaveLength(0)
   })
 
@@ -1852,7 +2165,7 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page)
     await expectNodeCardPing(page, '7 ms', '0.0%')
-    await expectNodeCardPingTooltip(page, 'latency', '23:02:00\n延迟：7 ms\n丢包：0.0%')
+    await expectNodeCardPingTooltip(page, 'latency', '23:00–23:03\n延迟：7 ms\n丢包：0.0%\n最新样本：23:02:00')
 
     const selectedQueries = () => calls.filter(call => call.method === 'public:queryMetrics'
       && (call.params.tags as Record<string, unknown> | undefined)?.task_id === '202')
@@ -1862,7 +2175,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await fixture.advanceTime(10_000)
     await expect.poll(() => selectedQueries().length).toBe(initialQueryCount + 1)
     await expectNodeCardPing(page, '7 ms', '0.0%')
-    await expectNodeCardPingTooltip(page, 'latency', '23:02:00\n延迟：7 ms\n丢包：0.0%')
+    await expectNodeCardPingTooltip(page, 'latency', '23:00–23:03\n延迟：7 ms\n丢包：0.0%\n最新样本：23:02:00')
     expect((await primaryNodeCard(page).locator('[data-node-ping-bars="latency"] [data-node-ping-bar]').evaluateAll(elements => elements.map(element => element.getAttribute('aria-label') ?? '')))
       .some(text => text.includes('23:03:00') && text.includes('无采样数据'))).toBe(false)
 
@@ -1880,7 +2193,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await fixture.advanceTime(10_000)
     await expect.poll(() => selectedQueries().length).toBe(initialQueryCount + 3)
     await expectNodeCardPing(page, '9 ms', '0.0%')
-    await expectNodeCardPingTooltip(page, 'latency', '23:03:00\n延迟：9 ms\n丢包：0.0%')
+    await expectNodeCardPingTooltip(page, 'latency', '最新样本：23:03:00')
   })
 
   test('v1.3.3 keeps a cold newest bucket PENDING until its real API sample becomes visible, then renders DATA without reload', async ({ page }) => {
@@ -1899,11 +2212,16 @@ test.describe('node-card per-node ping task bindings', () => {
     for (const metric of ['latency', 'loss'] as const)
       await expectNodeCardPingBucketState(page, metric, PING_INGESTION_BUCKET, 'pending')
     await expectNodeCardPingBucketState(page, 'latency', PING_PREVIOUS_BUCKET, 'data')
-    await expectNodeCardPingTooltip(page, 'latency', '11:59:00\n延迟：7 ms\n丢包：0.0%')
+    await expectNodeCardPingTooltip(page, 'latency', '11:57–12:00\n延迟：7 ms\n丢包：0.0%\n最新样本：11:59:00')
     await expectNodeCardPingInfoStatus(page, '数据正常')
-    await nodeCardPingBucket(page, 'latency', PING_INGESTION_BUCKET).hover()
-    await expect(page.locator('[data-slot="data-tooltip-content"]')).toContainText('等待采样')
-    await page.keyboard.press('Escape')
+    const pendingBucket = nodeCardPingBucket(page, 'latency', PING_INGESTION_BUCKET)
+    await expect(pendingBucket).toHaveAttribute('aria-hidden', 'true')
+    await expect(pendingBucket).toHaveCSS('pointer-events', 'none')
+    await expect(pendingBucket).toHaveCSS('opacity', '0')
+    const pendingBox = await pendingBucket.boundingBox()
+    expect(pendingBox).not.toBeNull()
+    await page.mouse.move(pendingBox!.x + pendingBox!.width / 2, pendingBox!.y + pendingBox!.height / 2)
+    await expect(page.locator('[data-slot="data-tooltip-content"]')).toHaveCount(0)
     expect(selectedPingMetricTimelineEntries(fixture.timeline)
       .some(entry => entry.responseSamples.some(sample => sample.sampleAt === Date.parse(PING_INGESTION_SAMPLE)))).toBe(false)
 
@@ -1913,8 +2231,8 @@ test.describe('node-card per-node ping task bindings', () => {
     await fixture.advanceTime(10_000)
     for (const metric of ['latency', 'loss'] as const)
       await expectNodeCardPingBucketState(page, metric, PING_INGESTION_BUCKET, 'data')
-    await expectNodeCardPingTooltip(page, 'latency', '12:00:00\n延迟：9 ms\n丢包：0.0%')
-    await expectNodeCardPingTooltip(page, 'loss', '12:00:00\n延迟：9 ms\n丢包：0.0%')
+    await expectNodeCardPingTooltip(page, 'latency', '12:00–12:03\n延迟：9 ms\n丢包：0.0%\n最新样本：12:00:00')
+    await expectNodeCardPingTooltip(page, 'loss', '12:00–12:03\n延迟：9 ms\n丢包：0.0%\n最新样本：12:00:00')
     await expect(page).toHaveURL(beforeRefreshUrl)
 
     const firstApiVisibility = selectedPingMetricTimelineEntries(fixture.timeline).find((entry) => {
@@ -1953,7 +2271,7 @@ test.describe('node-card per-node ping task bindings', () => {
 
     await expectNodeCardPingBucketState(page, 'latency', PING_PREVIOUS_BUCKET, 'data')
     await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'pending')
-    await expectNodeCardPingTooltip(page, 'latency', '11:59:20\n延迟：7 ms\n丢包：0.0%')
+    await expectNodeCardPingTooltip(page, 'latency', '11:57–12:00\n延迟：7 ms\n丢包：0.0%\n最新样本：11:59:20')
     expect(selectedPingMetricTimelineEntries(fixture.timeline).every(entry => entry.responseSamples
       .every(sample => sample.sampleAt !== Date.parse(PING_ARBITRARY_PHASE_SAMPLE)))).toBe(true)
 
@@ -1963,7 +2281,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'pending')
     await fixture.advanceTime(6_000)
     await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'data')
-    await expectNodeCardPingTooltip(page, 'latency', '12:00:22\n延迟：13 ms\n丢包：0.0%')
+    await expectNodeCardPingTooltip(page, 'latency', '12:00–12:03\n延迟：13 ms\n丢包：0.0%\n最新样本：12:00:22')
 
     const rawSampleResponse = selectedPingMetricTimelineEntries(fixture.timeline).find(entry => entry.responseSamples
       .some(sample => sample.sampleAt === Date.parse(PING_ARBITRARY_PHASE_SAMPLE)))
@@ -2038,8 +2356,8 @@ test.describe('node-card per-node ping task bindings', () => {
 
     await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'unreachable')
     await expectNodeCardPingBucketState(page, 'loss', PING_INGESTION_BUCKET, 'data')
-    await expectNodeCardPingTooltip(page, 'latency', '12:00:00\n延迟：不可达\n丢包：100%')
-    await expectNodeCardPingTooltip(page, 'loss', '12:00:00\n延迟：不可达\n丢包：100%')
+    await expectNodeCardPingTooltip(page, 'latency', '12:00–12:03\n延迟：不可达\n丢包：100%\n最新样本：12:00:00')
+    await expectNodeCardPingTooltip(page, 'loss', '12:00–12:03\n延迟：不可达\n丢包：100%\n最新样本：12:00:00')
     const latencyTooltipContents = await primaryNodeCard(page)
       .locator('[data-node-ping-bars="latency"] [data-node-ping-bar]')
       .evaluateAll(elements => elements.map(element => element.getAttribute('aria-label') ?? ''))
@@ -2190,6 +2508,8 @@ test.describe('node-card per-node ping task bindings', () => {
     const cardBefore = await card.boundingBox()
     await bucket.hover()
     await expect(tooltip).toBeVisible({ timeout: 200 })
+    await expect(tooltip).toContainText('12:00–12:03')
+    await expect(tooltip).toContainText('最新样本')
     await expect(tooltip).toContainText('12:00:00')
     await expect(tooltip).toContainText('204 ms')
     await expect(tooltip).toContainText('50.0%')
@@ -2339,7 +2659,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await page.goBack()
     await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
     await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'data')
-    await expectNodeCardPingTooltip(page, 'latency', '12:00:00\n延迟：13 ms\n丢包：0.0%')
+    await expectNodeCardPingTooltip(page, 'latency', '12:00–12:03\n延迟：13 ms\n丢包：0.0%\n最新样本：12:00:00')
     const nodeCardVisibleAt = fixture.now()
 
     expect(apiVisible!.responseAt).toBeGreaterThanOrEqual(Date.parse(PING_INGESTION_SAMPLE))
@@ -2405,7 +2725,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await page.goBack()
     await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
     await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'data')
-    await expectNodeCardPingTooltip(page, 'latency', '12:00:02\n延迟：17 ms\n丢包：0.0%')
+    await expectNodeCardPingTooltip(page, 'latency', '12:00–12:03\n延迟：17 ms\n丢包：0.0%\n最新样本：12:00:02')
     await expectNodeCardPingBucketState(page, 'latency', PING_PREVIOUS_BUCKET, 'error')
     await expectNodeCardPingTooltip(page, 'latency', '更新失败')
 
@@ -2446,7 +2766,7 @@ test.describe('node-card per-node ping task bindings', () => {
 
     for (const metric of ['latency', 'loss'] as const)
       await expectNodeCardPingBucketState(page, metric, PING_INGESTION_BUCKET, 'confirmed-missing')
-    await expectNodeCardPingTooltip(page, 'latency', '12:00:00\n暂无采样')
+    await expectNodeCardPingTooltip(page, 'latency', '12:00–12:03\n暂无采样')
     await nodeCardPingBucket(page, 'latency', PING_INGESTION_BUCKET).hover()
     await expect(page.locator('[data-slot="data-tooltip-content"]')).toContainText('暂无采样')
     await page.keyboard.press('Escape')
@@ -2482,7 +2802,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await fixture.advanceTime(56_000)
     for (const metric of ['latency', 'loss'] as const)
       await expectNodeCardPingBucketState(page, metric, PING_INGESTION_BUCKET, 'data')
-    await expectNodeCardPingTooltip(page, 'latency', '12:00:00\n延迟：11 ms\n丢包：0.0%')
+    await expectNodeCardPingTooltip(page, 'latency', '12:00–12:03\n延迟：11 ms\n丢包：0.0%\n最新样本：12:00:00')
     expect(fixture.timeline.some(entry => entry.responseSamples
       .some(sample => sample.sampleAt === Date.parse(PING_INGESTION_SAMPLE) && sample.latency === 11))).toBe(true)
   })
@@ -2500,7 +2820,7 @@ test.describe('node-card per-node ping task bindings', () => {
       },
     })
     await openStablePage(page)
-    await expectNodeCardPingTooltip(page, 'latency', '11:59:00\n延迟：71 ms\n丢包：0.0%')
+    await expectNodeCardPingTooltip(page, 'latency', '11:57–12:00\n延迟：71 ms\n丢包：0.0%\n最新样本：11:59:00')
     expect(await page.evaluate(prefix => Object.keys(localStorage)
       .some(key => key.startsWith(prefix) && !key.endsWith(':index')), MULTI_PING_CACHE_PREFIX)).toBe(true)
 
@@ -2532,7 +2852,7 @@ test.describe('node-card per-node ping task bindings', () => {
       })
       await openStablePage(coldPage)
       await expectNodeCardPingBucketState(coldPage, 'latency', PING_INGESTION_BUCKET, 'pending')
-      await expectNodeCardPingTooltip(coldPage, 'latency', '11:59:00\n延迟：7 ms\n丢包：0.0%')
+      await expectNodeCardPingTooltip(coldPage, 'latency', '11:57–12:00\n延迟：7 ms\n丢包：0.0%\n最新样本：11:59:00')
       expect(await coldPage.evaluate(() => {
         return (window as typeof window & { __coldPingFixtureStorageKeyCount?: number })
           .__coldPingFixtureStorageKeyCount
@@ -2560,7 +2880,7 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page)
     await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'pending')
-    await expectNodeCardPingTooltip(page, 'latency', '11:59:00\n延迟：71 ms\n丢包：0.0%')
+    await expectNodeCardPingTooltip(page, 'latency', '11:57–12:00\n延迟：71 ms\n丢包：0.0%\n最新样本：11:59:00')
     expect(await page.evaluate(prefix => Object.keys(localStorage)
       .some(key => key.startsWith(prefix) && !key.endsWith(':index')), MULTI_PING_CACHE_PREFIX)).toBe(true)
 
@@ -2572,7 +2892,7 @@ test.describe('node-card per-node ping task bindings', () => {
     }
     const expectWarmSelectedSnapshot = async () => {
       await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'pending')
-      await expectNodeCardPingTooltip(page, 'latency', '11:59:00\n延迟：71 ms\n丢包：0.0%')
+      await expectNodeCardPingTooltip(page, 'latency', '11:57–12:00\n延迟：71 ms\n丢包：0.0%\n最新样本：11:59:00')
     }
 
     await page.context().clearCookies()
@@ -3005,8 +3325,8 @@ test.describe('node-card per-node ping task bindings', () => {
     const lossBars = primaryNodeCard(page).locator('[data-node-ping-bars="loss"] [data-node-ping-bar]')
     await expect(latencyBars).toHaveCount(20)
     await expect(lossBars).toHaveCount(20)
-    await expect(latencyBars.first()).toHaveAttribute('aria-label', /20:00:00[\s\S]*7 ms/)
-    await expect(lossBars.first()).toHaveAttribute('aria-label', /20:00:00[\s\S]*0\.0%/)
+    await expect(latencyBars.first()).toHaveAttribute('aria-label', /20:00–20:03[\s\S]*7 ms[\s\S]*最新样本：20:00:00/)
+    await expect(lossBars.first()).toHaveAttribute('aria-label', /20:00–20:03[\s\S]*0\.0%[\s\S]*最新样本：20:00:00/)
   })
 
   test('uses selected Legacy history instead of a stats.latest-only synthetic Metric point', async ({ page }) => {

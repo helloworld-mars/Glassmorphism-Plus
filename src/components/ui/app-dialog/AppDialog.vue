@@ -50,7 +50,7 @@ const emit = defineEmits<{
         class="fixed left-1/2 top-1/2 z-101 flex max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom)_-_2rem)] w-[calc(100vw_-_env(safe-area-inset-left)_-_env(safe-area-inset-right)_-_2rem)] max-w-5xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border border-border/70 bg-card/95 text-card-foreground shadow-2xl backdrop-blur-xl focus:outline-none"
         :class="contentClass"
       >
-        <div class="flex items-start gap-3 border-b border-border/60 px-4 py-3 sm:px-5">
+        <div data-app-dialog-header class="flex items-start gap-3 border-b border-border/60 px-4 py-3 sm:px-5">
           <div class="min-w-0 flex-1">
             <DialogTitle class="truncate text-base font-semibold">
               {{ title }}
@@ -69,7 +69,7 @@ const emit = defineEmits<{
             </button>
           </DialogClose>
         </div>
-        <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5">
+        <div data-app-dialog-body class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5">
           <slot />
         </div>
       </DialogContent>

@@ -12,6 +12,7 @@ import { computed, ref, watch } from 'vue'
 import { AppDialog } from '@/components/ui/app-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import * as financeHelper from '@/utils/financeHelper'
 import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, isFreeNode, isFreePrice } from '@/utils/tagHelper'
@@ -248,63 +249,64 @@ function formatTraffic(tib: number): string {
     :open="open"
     title="价值与费用明细"
     description="固定账单、纯前端按量估算与汇率设置"
+    content-class="finance-details-dialog"
     @update:open="emit('update:open', $event)"
   >
-    <div class="space-y-4">
-      <div class="grid grid-cols-3 divide-x divide-border/60 border-y border-border/60 py-3 text-center">
-        <div class="min-w-0 px-2">
-          <div class="text-xs text-muted-foreground">
+    <div class="finance-details-content space-y-4">
+      <div data-finance-summary class="grid grid-cols-3 divide-x divide-border/60 border-y border-border/60 py-3 text-center">
+        <div class="min-w-0 px-1.5 sm:px-2">
+          <div class="text-[10px] leading-tight text-muted-foreground sm:text-xs">
             剩余价值
           </div>
-          <div class="mt-1 truncate text-lg font-semibold tabular-nums">
+          <div class="mt-1 break-words text-sm font-semibold tabular-nums sm:text-lg">
             {{ formatDisplayAmount(totalRemainingCNY) }}
           </div>
         </div>
-        <div class="min-w-0 px-2">
-          <div class="text-xs text-muted-foreground">
+        <div class="min-w-0 px-1.5 sm:px-2">
+          <div class="text-[10px] leading-tight text-muted-foreground sm:text-xs">
             固定月均支出
           </div>
-          <div class="mt-1 truncate text-lg font-semibold tabular-nums">
+          <div class="mt-1 break-words text-sm font-semibold tabular-nums sm:text-lg">
             {{ formatDisplayAmount(totalMonthlyCNY) }}
           </div>
         </div>
-        <div class="min-w-0 px-2">
-          <div class="text-xs text-muted-foreground">
+        <div class="min-w-0 px-1.5 sm:px-2">
+          <div class="text-[10px] leading-tight text-muted-foreground sm:text-xs">
             当前节点估算
           </div>
-          <div class="mt-1 truncate text-lg font-semibold tabular-nums">
+          <div class="mt-1 break-words text-sm font-semibold tabular-nums sm:text-lg">
             {{ formatOptionalDisplayAmount(totalMeteredCNY) }}
           </div>
         </div>
       </div>
 
       <Tabs v-model="activeTab" class="gap-4">
-        <div class="flex flex-wrap items-center gap-2">
-          <TabsList class="h-9 min-w-0 flex-1 sm:flex-none">
-            <TabsTrigger value="fixed">
+        <div data-finance-controls class="grid min-w-0 gap-2 sm:flex sm:flex-wrap sm:items-center">
+          <TabsList class="grid h-auto min-w-0 grid-cols-3 sm:inline-flex sm:h-9 sm:flex-none">
+            <TabsTrigger value="fixed" class="min-w-0 gap-1 px-1 text-[11px] sm:gap-1.5 sm:px-2 sm:text-sm">
               <Icon icon="tabler:calendar-dollar" />固定账单
             </TabsTrigger>
-            <TabsTrigger value="metered">
+            <TabsTrigger value="metered" class="min-w-0 gap-1 px-1 text-[11px] sm:gap-1.5 sm:px-2 sm:text-sm">
               <Icon icon="tabler:calculator" />按量估算
             </TabsTrigger>
-            <TabsTrigger value="rates">
+            <TabsTrigger value="rates" class="min-w-0 gap-1 px-1 text-[11px] sm:gap-1.5 sm:px-2 sm:text-sm">
               <Icon icon="tabler:currency-yuan" />汇率设置
             </TabsTrigger>
           </TabsList>
-          <label class="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-            <input
-              type="checkbox"
-              class="size-4 accent-primary"
-              :checked="excludeFree"
-              @change="emit('update:excludeFree', ($event.target as HTMLInputElement).checked)"
-            >
-            排除免费节点
+          <label for="finance-exclude-free" class="flex min-w-0 items-center justify-between gap-3 rounded-md border border-border/55 px-2.5 py-2 text-xs text-muted-foreground sm:ml-auto sm:border-0 sm:px-0 sm:py-0">
+            <span>排除免费节点</span>
+            <Switch
+              id="finance-exclude-free"
+              :model-value="excludeFree"
+              aria-label="排除免费节点"
+              @update:model-value="emit('update:excludeFree', $event)"
+            />
           </label>
         </div>
 
         <TabsContent value="fixed" class="space-y-2">
-          <div class="flex items-end justify-between gap-3">
-            <div>
+          <div class="flex min-w-0 items-end justify-between gap-3">
+            <div class="min-w-0">
               <h3 class="text-sm font-semibold">
                 固定账单明细
               </h3>
@@ -315,7 +317,7 @@ function formatTraffic(tib: number): string {
             <select
               :value="currency"
               aria-label="显示币种"
-              class="h-8 rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-2 focus:ring-ring"
+              class="h-8 max-w-24 shrink-0 rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-2 focus:ring-ring"
               @change="handleCurrencyChange"
             >
               <option v-for="item in financeHelper.SUPPORTED_CURRENCIES" :key="item" :value="item">
@@ -324,7 +326,7 @@ function formatTraffic(tib: number): string {
             </select>
           </div>
 
-          <div class="overflow-x-auto rounded-md border border-border/60">
+          <div data-finance-desktop-table class="hidden overflow-x-auto rounded-md border border-border/60 sm:block">
             <table class="w-full min-w-[620px] text-left text-xs">
               <thead class="bg-muted/45 text-muted-foreground">
                 <tr>
@@ -373,6 +375,51 @@ function formatTraffic(tib: number): string {
               </tbody>
             </table>
           </div>
+
+          <div data-finance-mobile-list class="space-y-2 sm:hidden">
+            <article v-for="row in fixedRows" :key="row.node.uuid" data-finance-mobile-row class="min-w-0 rounded-md border border-border/60 bg-muted/20 p-3">
+              <h4 class="break-words text-sm font-semibold">
+                {{ row.node.name }}
+              </h4>
+              <dl class="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                <div class="min-w-0">
+                  <dt class="text-muted-foreground">
+                    固定费用
+                  </dt>
+                  <dd class="mt-0.5 break-words">
+                    {{ formatPriceWithCycle(row.node.price, row.node.billing_cycle, row.node.currency) }}
+                  </dd>
+                </div>
+                <div class="min-w-0">
+                  <dt class="text-muted-foreground">
+                    到期
+                  </dt>
+                  <dd class="mt-0.5 break-words">
+                    {{ row.expiryLabel }}
+                  </dd>
+                </div>
+                <div class="min-w-0">
+                  <dt class="text-muted-foreground">
+                    剩余价值
+                  </dt>
+                  <dd class="mt-0.5 break-words">
+                    {{ formatRemainingValue(row.node, row.remainingCNY) }}
+                  </dd>
+                </div>
+                <div class="min-w-0">
+                  <dt class="text-muted-foreground">
+                    月均支出
+                  </dt>
+                  <dd class="mt-0.5 break-words font-semibold tabular-nums">
+                    {{ formatDisplayAmount(row.monthlyCNY) }}
+                  </dd>
+                </div>
+              </dl>
+            </article>
+            <div v-if="fixedRows.length === 0" class="rounded-md border border-border/60 px-3 py-8 text-center text-sm text-muted-foreground">
+              暂无账单节点
+            </div>
+          </div>
         </TabsContent>
 
         <TabsContent value="metered" class="space-y-3">
@@ -380,8 +427,8 @@ function formatTraffic(tib: number): string {
             按量费用估算器仅在当前浏览器计算，不写入 Komari。当前探针累计流量可能因机器重启、Agent 重启或网卡变化而重置，也可能包含安装 Komari 前的流量。1 TiB = 1024⁴ bytes，本结果不是正式账单。
           </div>
 
-          <div class="flex flex-wrap items-end gap-3">
-            <label class="min-w-44 flex-1 space-y-1 text-xs">
+          <div class="grid min-w-0 grid-cols-1 items-end gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <label class="min-w-0 space-y-1 text-xs sm:col-span-2 lg:col-span-1">
               <span class="font-medium">估算节点</span>
               <select
                 :value="selectedNodeUuid"
@@ -392,7 +439,7 @@ function formatTraffic(tib: number): string {
                 <option v-for="node in visibleNodes" :key="node.uuid" :value="node.uuid">{{ node.name }}</option>
               </select>
             </label>
-            <label class="space-y-1 text-xs">
+            <label class="min-w-0 space-y-1 text-xs">
               <span class="font-medium">流量口径</span>
               <select
                 :value="meteredSettings.trafficMode"
@@ -402,7 +449,7 @@ function formatTraffic(tib: number): string {
                 <option v-for="(label, key) in trafficModeLabels" :key="key" :value="key">{{ label }}</option>
               </select>
             </label>
-            <label class="space-y-1 text-xs">
+            <label class="min-w-0 space-y-1 text-xs">
               <span class="font-medium">计价币种</span>
               <select
                 :value="meteredSettings.currency"
@@ -412,7 +459,7 @@ function formatTraffic(tib: number): string {
                 <option v-for="item in financeHelper.SUPPORTED_CURRENCIES" :key="item" :value="item">{{ item }}</option>
               </select>
             </label>
-            <label class="space-y-1 text-xs">
+            <label class="min-w-0 space-y-1 text-xs">
               <span class="font-medium">显示币种</span>
               <select
                 :value="currency"
@@ -425,7 +472,7 @@ function formatTraffic(tib: number): string {
             </label>
           </div>
 
-          <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div class="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2 md:grid-cols-4">
             <label class="space-y-1 text-xs">
               <span class="font-medium">流量单价 / TiB</span>
               <Input type="number" min="0" :max="financeHelper.MAX_ESTIMATE_INPUT" step="any" :model-value="meteredSettings.trafficRate" class="h-9" @update:model-value="handleMeteredNumberUpdate('trafficRate', $event)" />
@@ -444,13 +491,13 @@ function formatTraffic(tib: number): string {
             </label>
           </div>
 
-          <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <div class="grid grid-cols-1 items-center gap-2 text-xs text-muted-foreground sm:flex sm:flex-wrap">
             <span>快照：{{ formatSnapshotTime() }}</span>
             <span v-if="selectedSnapshot?.statusUpdatedAt">· 探针上报：{{ selectedSnapshot.statusUpdatedAt }}</span>
-            <Button type="button" size="sm" variant="outline" class="ml-auto h-8 gap-1.5" :disabled="!snapshotUptimeAvailable" @click="useSnapshotUptime">
+            <Button type="button" size="sm" variant="outline" class="h-8 w-full gap-1.5 sm:ml-auto sm:w-auto" :disabled="!snapshotUptimeAvailable" @click="useSnapshotUptime">
               <Icon icon="tabler:clock-down" width="14" height="14" />带入当前 uptime
             </Button>
-            <Button type="button" size="sm" variant="ghost" class="h-8 gap-1.5" @click="clearMeteredSettings">
+            <Button type="button" size="sm" variant="ghost" class="h-8 w-full gap-1.5 sm:w-auto" @click="clearMeteredSettings">
               <Icon icon="tabler:trash" width="14" height="14" />清除本地配置
             </Button>
           </div>
@@ -528,7 +575,7 @@ function formatTraffic(tib: number): string {
             </Button>
           </div>
 
-          <div class="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3 lg:grid-cols-4">
+          <div class="grid grid-cols-1 gap-x-3 gap-y-2 min-[400px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
             <label v-for="item in financeHelper.SUPPORTED_CURRENCIES" :key="item" class="grid grid-cols-[2.5rem_1fr] items-center gap-2 text-xs">
               <span class="font-medium">{{ item }}</span>
               <Input

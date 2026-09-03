@@ -2,6 +2,19 @@
 
 本文件只记录 **Glassmorphism Plus** 自己的发行版本。原始 Glassmorphism 的版本历史请查看[上游仓库](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases)；Plus 的选择性同步记录见 [UPSTREAM.md](UPSTREAM.md)。
 
+## [2.5.0] - 2026-09-03
+
+### Changed
+
+- 首页 NodeCard Ping 统一为同一小时窗口内对齐的 20 个三分钟半开区间；Tooltip 同时展示固定 bucket 区间和最新真实样本时刻，不再把两者混为一个时间。
+- OPEN / PENDING 采集槽保留固定几何，但在有真实结果或确认的不可达、缺失、错误前不可见、不可交互且不显示等待 Tooltip。
+- 价值与费用明细在 iPhone 与其他小屏上改为 safe-area 内的近全屏内部滚动布局，使用固定标题、响应式摘要、标准 Switch 与移动卡片投影；桌面表格保持原样。
+
+### Compatibility and performance
+
+- 保留既有 task/node identity、Metric/Legacy fallback、有限重试、grace/deadline、heartbeat、cleanup、late backfill、计费算法与 API/schema 契约。
+- 12 节点 × 3 任务仍只使用共享窗口与有界请求；Chromium 完整回归 188/188、WebKit desktop + iPhone 376/376 通过。
+
 ## [2.3.1] - 2026-09-03
 
 ### Changed
@@ -154,6 +167,7 @@
 
 Git tags `1.0`、`1.1` 与 `1.2` 指向同一历史 commit。现有证据不足以为这三个 tag 分别重建独立、可靠的变更列表，因此这里只保留历史事实，不推测具体修复内容。
 
+[2.5.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.3.1...v2.5.0
 [2.3.1]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.1.0...v2.2.0

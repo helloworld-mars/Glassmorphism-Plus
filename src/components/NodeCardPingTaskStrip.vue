@@ -97,34 +97,44 @@ const sourceText = computed(() => props.snapshot?.source
   ? props.snapshot.source === 'metric' ? '指标存储' : '同任务兼容接口'
   : '-')
 function bucketTooltipDetails(point: NodeCardPingHistoryPoint): {
-  timestamp: string
+  interval: string
+  sampleTimestamp: string
   status: string
   latency: string
   loss: string
   stale: boolean
 } {
-  const sampleTime = point.latencySampleTime ?? point.lossSampleTime ?? point.time
-  const timestamp = sampleTime ? formatDateTime(sampleTime, 'HH:mm:ss') : ''
+  const index = history.value.indexOf(point)
+  const bucketEnd = bucketEndTime(index)
+  const interval = point.time && bucketEnd
+    ? `${formatDateTime(point.time, 'HH:mm')}–${formatDateTime(bucketEnd, 'HH:mm')}`
+    : ''
+  const sampleTime = [point.latencySampleTime, point.lossSampleTime]
+    .filter((value): value is string => Boolean(value))
+    .sort((left, right) => Date.parse(right) - Date.parse(left))[0]
+  const sampleTimestamp = sampleTime ? formatDateTime(sampleTime, 'HH:mm:ss') : ''
   if (isConfirmedNodeCardPingUnreachable(point))
-    return { timestamp, status: '', latency: '不可达', loss: '100%', stale: false }
+    return { interval, sampleTimestamp, status: '', latency: '不可达', loss: '100%', stale: false }
   if (props.snapshot?.error) {
     if (point.latency !== null || point.loss !== null) {
       return {
-        timestamp,
+        interval,
+        sampleTimestamp,
         status: '',
         latency: point.latency === null ? '-' : `${Math.round(point.latency)} ms`,
         loss: point.loss === null ? '-' : `${point.loss.toFixed(1)}%`,
         stale: true,
       }
     }
-    return { timestamp, status: '更新失败', latency: '', loss: '', stale: false }
+    return { interval, sampleTimestamp, status: '更新失败', latency: '', loss: '', stale: false }
   }
   if (point.latency === null && point.loss === null) {
     const missing = point.latencyState === 'confirmed-missing' || point.lossState === 'confirmed-missing'
-    return { timestamp, status: missing ? '暂无采样' : '等待采样', latency: '', loss: '', stale: false }
+    return { interval, sampleTimestamp, status: missing ? '暂无采样' : '等待采样', latency: '', loss: '', stale: false }
   }
   return {
-    timestamp,
+    interval,
+    sampleTimestamp,
     status: '',
     latency: point.latency === null ? '-' : `${Math.round(point.latency)} ms`,
     loss: point.loss === null ? '-' : `${point.loss.toFixed(1)}%`,
@@ -148,13 +158,30 @@ function lossBucketState(point: NodeCardPingHistoryPoint): string {
   return props.snapshot?.error && point.lossState === 'pending' ? 'error' : point.lossState
 }
 
+function bucketEndTime(index: number): string {
+  return history.value[index + 1]?.time
+    || (props.snapshot?.windowEnd ? new Date(props.snapshot.windowEnd).toISOString() : '')
+}
+
+function bucketSampleTime(point: NodeCardPingHistoryPoint): string {
+  return [point.latencySampleTime, point.lossSampleTime]
+    .filter((value): value is string => Boolean(value))
+    .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? ''
+}
+
+function isBucketInteractive(point: NodeCardPingHistoryPoint, metric: 'latency' | 'loss'): boolean {
+  return (metric === 'latency' ? latencyBucketState(point) : lossBucketState(point)) !== 'pending'
+}
+
 function barTooltip(point: NodeCardPingHistoryPoint): string {
   const details = bucketTooltipDetails(point)
-  const lines = details.timestamp ? [details.timestamp] : []
+  const lines = details.interval ? [details.interval] : []
   if (details.status)
     lines.push(details.status)
   else
     lines.push(`延迟：${details.latency}`, `丢包：${details.loss}`)
+  if (details.sampleTimestamp)
+    lines.push(`最新样本：${details.sampleTimestamp}`)
   if (details.stale)
     lines.push('状态：更新失败（显示上次数据）')
   return lines.join('\n')
@@ -165,10 +192,14 @@ function barTooltip(point: NodeCardPingHistoryPoint): string {
   <div
     class="node-card-ping-task-strip min-w-0 rounded-lg bg-slate-500/5 text-left"
     :class="!online && 'opacity-50'"
+    :data-node-ping-fetched-at="snapshot?.fetchedAt ? new Date(snapshot.fetchedAt).toISOString() : undefined"
+    :data-node-ping-node-uuid="snapshot?.nodeUuid || undefined"
     :data-node-ping-outage="currentUnreachable || undefined"
     :data-node-ping-size="size"
     :data-node-ping-task-id="taskId"
     :data-node-ping-status="status"
+    :data-node-ping-window-end="snapshot?.windowEnd ? new Date(snapshot.windowEnd).toISOString() : undefined"
+    :data-node-ping-window-start="snapshot?.windowStart ? new Date(snapshot.windowStart).toISOString() : undefined"
     @click.stop="emit('click')"
   >
     <div class="node-card-ping-task-header min-w-0 text-[10px] leading-none sm:text-[11px]">
@@ -221,71 +252,103 @@ function barTooltip(point: NodeCardPingHistoryPoint): string {
     <div class="node-card-ping-trend-row" data-node-ping-panel="latency" data-node-ping-trend="latency">
       <span class="node-card-ping-trend-label" data-node-ping-header="latency">延迟</span>
       <span class="node-card-ping-bucket-grid" data-node-ping-bars="latency">
-        <DataTooltip
-          v-for="(point, index) in history"
-          :key="`latency-${index}`"
-          as="span"
-          data-node-ping-bar
-          :data-node-ping-bucket-time="point.time || undefined"
-          :data-node-ping-state="latencyBucketState(point)"
-          :data-node-ping-severity="latencyBucketSeverity(point, Boolean(snapshot?.error))"
-          placement="top"
-          :content="barTooltip(point)"
-          open-on-click
-          content-class="node-card-ping-bucket-tooltip"
-          class="node-card-ping-bucket-hitbox"
-          tabindex="-1"
-          :aria-label="barTooltip(point)"
-          @click.stop
-        >
-          <span class="node-card-ping-bucket-fill" data-node-ping-bucket-fill />
-          <template #content>
-            <div v-if="bucketTooltipDetails(point).timestamp" class="node-card-ping-tooltip-time">{{ bucketTooltipDetails(point).timestamp }}</div>
-            <div v-if="bucketTooltipDetails(point).status" class="node-card-ping-tooltip-status">{{ bucketTooltipDetails(point).status }}</div>
-            <dl v-else class="node-card-ping-bucket-tooltip-grid">
-              <dt>延迟</dt><dd>{{ bucketTooltipDetails(point).latency }}</dd>
-              <dt>丢包</dt><dd>{{ bucketTooltipDetails(point).loss }}</dd>
-              <template v-if="bucketTooltipDetails(point).stale">
-                <dt>状态</dt><dd class="node-card-ping-tooltip-wrap">更新失败（显示上次数据）</dd>
-              </template>
-            </dl>
-          </template>
-        </DataTooltip>
+        <template v-for="(point, index) in history" :key="`latency-${index}`">
+          <DataTooltip
+            v-if="isBucketInteractive(point, 'latency')"
+            as="span"
+            data-node-ping-bar
+            :data-node-ping-bucket-time="point.time || undefined"
+            :data-node-ping-bucket-start="point.time || undefined"
+            :data-node-ping-bucket-end="bucketEndTime(index) || undefined"
+            :data-node-ping-sample-time="bucketSampleTime(point) || undefined"
+            :data-node-ping-state="latencyBucketState(point)"
+            :data-node-ping-severity="latencyBucketSeverity(point, Boolean(snapshot?.error))"
+            placement="top"
+            :content="barTooltip(point)"
+            open-on-click
+            content-class="node-card-ping-bucket-tooltip"
+            class="node-card-ping-bucket-hitbox"
+            tabindex="-1"
+            :aria-label="barTooltip(point)"
+            @click.stop
+          >
+            <span class="node-card-ping-bucket-fill" data-node-ping-bucket-fill />
+            <template #content>
+              <div v-if="bucketTooltipDetails(point).interval" class="node-card-ping-tooltip-time">{{ bucketTooltipDetails(point).interval }}</div>
+              <div v-if="bucketTooltipDetails(point).status" class="node-card-ping-tooltip-status">{{ bucketTooltipDetails(point).status }}</div>
+              <dl v-else class="node-card-ping-bucket-tooltip-grid">
+                <dt>延迟</dt><dd>{{ bucketTooltipDetails(point).latency }}</dd>
+                <dt>丢包</dt><dd>{{ bucketTooltipDetails(point).loss }}</dd>
+                <dt v-if="bucketTooltipDetails(point).sampleTimestamp">最新样本</dt><dd v-if="bucketTooltipDetails(point).sampleTimestamp">{{ bucketTooltipDetails(point).sampleTimestamp }}</dd>
+                <template v-if="bucketTooltipDetails(point).stale">
+                  <dt>状态</dt><dd class="node-card-ping-tooltip-wrap">更新失败（显示上次数据）</dd>
+                </template>
+              </dl>
+            </template>
+          </DataTooltip>
+          <span
+            v-else
+            data-node-ping-bar
+            :data-node-ping-bucket-time="point.time || undefined"
+            :data-node-ping-bucket-start="point.time || undefined"
+            :data-node-ping-bucket-end="bucketEndTime(index) || undefined"
+            data-node-ping-state="pending"
+            :data-node-ping-severity="latencyBucketSeverity(point, Boolean(snapshot?.error))"
+            class="node-card-ping-bucket-hitbox"
+            aria-hidden="true"
+          ><span class="node-card-ping-bucket-fill" data-node-ping-bucket-fill /></span>
+        </template>
       </span>
     </div>
     <div class="node-card-ping-trend-row" data-node-ping-panel="loss" data-node-ping-trend="loss">
       <span class="node-card-ping-trend-label" data-node-ping-header="loss">丢包</span>
       <span class="node-card-ping-bucket-grid" data-node-ping-bars="loss">
-        <DataTooltip
-          v-for="(point, index) in history"
-          :key="`loss-${index}`"
-          as="span"
-          data-node-ping-bar
-          :data-node-ping-bucket-time="point.time || undefined"
-          :data-node-ping-state="lossBucketState(point)"
-          :data-node-ping-severity="lossBucketSeverity(point, Boolean(snapshot?.error))"
-          placement="top"
-          :content="barTooltip(point)"
-          open-on-click
-          content-class="node-card-ping-bucket-tooltip"
-          class="node-card-ping-bucket-hitbox"
-          tabindex="-1"
-          :aria-label="barTooltip(point)"
-          @click.stop
-        >
-          <span class="node-card-ping-bucket-fill" data-node-ping-bucket-fill />
-          <template #content>
-            <div v-if="bucketTooltipDetails(point).timestamp" class="node-card-ping-tooltip-time">{{ bucketTooltipDetails(point).timestamp }}</div>
-            <div v-if="bucketTooltipDetails(point).status" class="node-card-ping-tooltip-status">{{ bucketTooltipDetails(point).status }}</div>
-            <dl v-else class="node-card-ping-bucket-tooltip-grid">
-              <dt>延迟</dt><dd>{{ bucketTooltipDetails(point).latency }}</dd>
-              <dt>丢包</dt><dd>{{ bucketTooltipDetails(point).loss }}</dd>
-              <template v-if="bucketTooltipDetails(point).stale">
-                <dt>状态</dt><dd class="node-card-ping-tooltip-wrap">更新失败（显示上次数据）</dd>
-              </template>
-            </dl>
-          </template>
-        </DataTooltip>
+        <template v-for="(point, index) in history" :key="`loss-${index}`">
+          <DataTooltip
+            v-if="isBucketInteractive(point, 'loss')"
+            as="span"
+            data-node-ping-bar
+            :data-node-ping-bucket-time="point.time || undefined"
+            :data-node-ping-bucket-start="point.time || undefined"
+            :data-node-ping-bucket-end="bucketEndTime(index) || undefined"
+            :data-node-ping-sample-time="bucketSampleTime(point) || undefined"
+            :data-node-ping-state="lossBucketState(point)"
+            :data-node-ping-severity="lossBucketSeverity(point, Boolean(snapshot?.error))"
+            placement="top"
+            :content="barTooltip(point)"
+            open-on-click
+            content-class="node-card-ping-bucket-tooltip"
+            class="node-card-ping-bucket-hitbox"
+            tabindex="-1"
+            :aria-label="barTooltip(point)"
+            @click.stop
+          >
+            <span class="node-card-ping-bucket-fill" data-node-ping-bucket-fill />
+            <template #content>
+              <div v-if="bucketTooltipDetails(point).interval" class="node-card-ping-tooltip-time">{{ bucketTooltipDetails(point).interval }}</div>
+              <div v-if="bucketTooltipDetails(point).status" class="node-card-ping-tooltip-status">{{ bucketTooltipDetails(point).status }}</div>
+              <dl v-else class="node-card-ping-bucket-tooltip-grid">
+                <dt>延迟</dt><dd>{{ bucketTooltipDetails(point).latency }}</dd>
+                <dt>丢包</dt><dd>{{ bucketTooltipDetails(point).loss }}</dd>
+                <dt v-if="bucketTooltipDetails(point).sampleTimestamp">最新样本</dt><dd v-if="bucketTooltipDetails(point).sampleTimestamp">{{ bucketTooltipDetails(point).sampleTimestamp }}</dd>
+                <template v-if="bucketTooltipDetails(point).stale">
+                  <dt>状态</dt><dd class="node-card-ping-tooltip-wrap">更新失败（显示上次数据）</dd>
+                </template>
+              </dl>
+            </template>
+          </DataTooltip>
+          <span
+            v-else
+            data-node-ping-bar
+            :data-node-ping-bucket-time="point.time || undefined"
+            :data-node-ping-bucket-start="point.time || undefined"
+            :data-node-ping-bucket-end="bucketEndTime(index) || undefined"
+            data-node-ping-state="pending"
+            :data-node-ping-severity="lossBucketSeverity(point, Boolean(snapshot?.error))"
+            class="node-card-ping-bucket-hitbox"
+            aria-hidden="true"
+          ><span class="node-card-ping-bucket-fill" data-node-ping-bucket-fill /></span>
+        </template>
       </span>
     </div>
   </div>

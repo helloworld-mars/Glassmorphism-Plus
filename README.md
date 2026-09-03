@@ -35,16 +35,16 @@
 
 | 项目               | 当前状态                                                                                                               |
 | :----------------- | :--------------------------------------------------------------------------------------------------------------------- |
-| 当前 Plus 版本     | **v2.3.1**                                                                                                             |
+| 当前 Plus 版本     | **v2.5.0**                                                                                                             |
 | 上游同步基线       | [sanrokamlan Glassmorphism v3.3.7](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases/tag/v3.3.7) |
 | 当前维护者         | [helloworld-mars](https://github.com/helloworld-mars)                                                                  |
 | 适用平台           | [Komari Monitor](https://github.com/komari-monitor/komari)                                                             |
 | 已验证 Komari 版本 | **1.4.3**                                                                                                              |
 | 技术栈             | Vue 3、TypeScript、Vite 7、Tailwind CSS 4、Pinia、ECharts、Bun                                                         |
-| 源码发布           | GitHub `main` 与 `v2.3.1` Release；Release 默认附加唯一、已验证的客户安装包                                            |
+| 源码发布           | GitHub `main` 与 `v2.5.0` Release；Release 默认附加唯一、已验证的客户安装包                                            |
 | 本地安装包         | `<version>/Glassmorphism-Plus-release-<version>.zip`                                                                   |
 
-Glassmorphism Plus 是独立维护的衍生主题。v2.3.1 为明确不可达加入独立的强错误红色语义，统一任务与时间桶自定义 Tooltip，并加固三位数延迟、100% 丢包和四种卡片尺寸的布局；上游 v3.3.7 是同步基线，不是 Plus 的当前版本。同步来源、取舍和署名详见 [UPSTREAM.md](UPSTREAM.md)。
+Glassmorphism Plus 是独立维护的衍生主题。v2.5.0 让首页 Ping 的三分钟固定 bucket 与真实样本时刻同时可读，隐藏未完成采集槽的命中区，并为 iPhone 重构价值与费用明细；上游 v3.3.7 是同步基线，不是 Plus 的当前版本。同步来源、取舍和署名详见 [UPSTREAM.md](UPSTREAM.md)。
 
 ---
 
@@ -136,7 +136,7 @@ Glassmorphism Plus 是独立维护的衍生主题。v2.3.1 为明确不可达加
 
 ### 重要说明
 
-- **v2.3.1 GitHub Release 默认附加且只附加一个已验证的 installer asset：** `Glassmorphism-Plus-release-2.3.1.zip`。
+- **v2.5.0 GitHub Release 默认附加且只附加一个已验证的 installer asset：** `Glassmorphism-Plus-release-2.5.0.zip`。
 - GitHub 自动生成的 **Source code (zip)** 是源码快照，**不是** Komari 可安装主题包。
 - Komari 的远程仓库导入流程应使用正式 Release 中的 installer asset；仍不要用 GitHub 自动生成的源码压缩包代替。
 
@@ -217,13 +217,13 @@ bun run release:prepare
 
 ## 📝 版本历史
 
-v2.3.1 的用户可见重点：
+v2.5.0 的用户可见重点：
 
-- 只有同一真实样本明确满足 `latency = null` 与 `loss = 100%` 时才使用独立强错误红色；`204 ms / 50.0%` 等严重劣化保留 critical 色，不再与完全不可达同色。
-- 任务摘要只由固定信息图标触发即时自定义 Tooltip；移除原生 `title`，并支持 hover、键盘 focus、点击／触摸、Esc、外部点击和 viewport 碰撞处理。
-- 每个 bucket 使用 portal 自定义 Tooltip，稳定容纳三位数延迟、完整丢包和中文状态；missing、pending 与 request error 不会冒充不可达。
-- task header 改用稳定 grid，为 latency、loss 与信息图标保留独立空间；mini、compact、comfortable、large 的单任务／三网组合均保持每轨 20 格。
-- 正式 Release 默认上传本地已验证客户 ZIP 作为唯一自定义 asset，并在上传后回下载复核 SHA-256、根结构和 manifest；ZIP 不进入 Git。
+- 首页每条 Ping 轨使用对齐的 20 个三分钟半开 bucket，所有节点和任务共享同一小时窗口。
+- Bucket Tooltip 同时显示固定区间、延迟、丢包和最新真实样本时刻；乱序、去重与迟到样本仍保留原时间。
+- OPEN / PENDING 槽在未获得可确认结果前保留固定几何但不可见、不可交互；真实结果、确认不可达／缺失／错误仍可查看。
+- 价值与费用明细在 iPhone 与横屏小屏上使用 safe-area、固定标题、内部纵向滚动、响应式控件和移动卡片；桌面固定账单表保持不变。
+- 计费算法、API/schema、Metric/Legacy fallback、有限重试、heartbeat、cleanup 和 late backfill 均未改动。
 
 完整 Plus 历史见 [CHANGELOG.md](CHANGELOG.md)。上游来源与选择性同步记录见 [UPSTREAM.md](UPSTREAM.md)。GitHub 发布记录见 [Releases](https://github.com/helloworld-mars/Glassmorphism-Plus/releases)。
 
