@@ -51,7 +51,7 @@ const actionButtons = computed(() => {
 
   if (router.currentRoute.value.name === 'home' && !appStore.loading && !appStore.hidePingTaskBindingEntry) {
     buttons.push({
-      title: 'Ping 监控中心',
+      title: '延迟监测中心',
       icon: 'tabler:activity-heartbeat',
       action: 'openPingCenter',
       pressed: ['pingsettings', 'node-ping-bindings'].includes(String(router.currentRoute.value.query.view ?? '')),

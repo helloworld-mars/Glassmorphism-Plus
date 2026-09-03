@@ -39,14 +39,14 @@ test('Plus documentation keeps its own version identity and preserves upstream a
 
   expect(readme).toContain('# 🌌 Komari Glassmorphism Plus')
   expect(readme).toContain('当前 Plus 版本')
-  expect(readme).toContain('**v2.5.0**')
+  expect(readme).toContain('**v2.6.0**')
   expect(readme).toContain('sanrokamlan Glassmorphism v3.3.7')
-  expect(readme).toContain('Glassmorphism-Plus-release-2.5.0.zip')
+  expect(readme).toContain('Glassmorphism-Plus-release-2.6.0.zip')
   expect(readme).toContain('Source code (zip)')
   expect(readme).not.toMatch(/^#{2,}\s+(?:\S.*)?v3\.\d/m)
 
   const changelogVersions = Array.from(changelog.matchAll(/^## \[([^\]]+)\]/gm), match => match[1])
-  expect(changelogVersions).toEqual(['2.5.0', '2.3.1', '2.3.0', '2.2.0', '2.1.0', '2.0.0', '1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
+  expect(changelogVersions).toEqual(['2.6.0', '2.5.0', '2.3.1', '2.3.0', '2.2.0', '2.1.0', '2.0.0', '1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
   expect(upstream).toContain('Current upstream baseline')
   expect(upstream).toContain('v3.3.7')
   expect(credits).toContain('helloworld-mars')
@@ -1087,13 +1087,13 @@ test('brand metadata and homepage footer retain current and original attribution
     name: 'Komari Glassmorphism Plus',
     short: 'glassmorphism-plus',
     description: 'A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.',
-    version: '2.5.0',
+    version: '2.6.0',
     author: 'helloworld-mars',
     url: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(packageMetadata).toMatchObject({
     name: 'komari-theme-glassmorphism-plus',
-    version: '2.5.0',
+    version: '2.6.0',
     homepage: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(themeManifest.short).toMatch(/^[\w-]+$/)
@@ -1137,7 +1137,7 @@ test('brand metadata and homepage footer retain current and original attribution
 
   const footer = page.locator('footer')
   await expect(footer.getByRole('link', { name: 'Glassmorphism Plus' })).toHaveAttribute('href', 'https://github.com/helloworld-mars/Glassmorphism-Plus')
-  await expect(footer.getByText('v2.5.0 · helloworld-mars', { exact: true }).first()).toBeVisible()
+  await expect(footer.getByText('v2.6.0 · helloworld-mars', { exact: true }).first()).toBeVisible()
   await expect(footer.getByRole('link', { name: 'Based on the original theme by sanrokamlan' }))
     .toHaveAttribute('href', 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism')
   await expect(footer).not.toContainText('unknown')
@@ -1183,10 +1183,10 @@ for (const scenario of [
     const entry = page.getByTestId('ping-center-entry')
     await expect(entry).toHaveCount(scenario.visible ? 1 : 0)
     if (scenario.visible) {
-      await expect(entry).toHaveAttribute('title', 'Ping 监控中心')
+      await expect(entry).toHaveAttribute('title', '延迟监测中心')
       await entry.hover()
       const tooltip = page.locator('[data-slot="tooltip-content"]')
-      await expect(tooltip).toContainText('Ping 监控中心')
+      await expect(tooltip).toContainText('延迟监测中心')
       await expect(tooltip).not.toContainText('09')
     }
     await expect(page.getByRole('button', { name: /主题/ })).toBeVisible()
@@ -3703,7 +3703,7 @@ test.describe('node-card per-node ping task bindings', () => {
     const originalSettings = fixture.getSavedThemeSettings()
     await openStablePage(page, '/?view=pingsettings')
 
-    await expect(page.getByRole('heading', { name: 'Ping 监控中心', exact: true })).toHaveClass(/text-2xl/)
+    await expect(page.getByRole('heading', { name: '延迟监测中心', exact: true })).toHaveClass(/text-2xl/)
     await expect(page.getByTestId('ping-center')).not.toContainText('09 · 延迟任务绑定')
 
     const primaryRow = page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)
@@ -3847,7 +3847,7 @@ test.describe('node-card per-node ping task bindings', () => {
     })
     await openStablePage(page, '/?view=pingsettings')
 
-    await expect(page.getByRole('heading', { name: 'Ping 监控中心', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '延迟监测中心', exact: true })).toBeVisible()
     await expect(page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)).toBeVisible()
     await expect(page.getByTestId('ping-center-entry')).toHaveCount(0)
   })
@@ -3857,7 +3857,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await installKomariFixture(page, { adminAccess: 'admin' })
     await openStablePage(page, '/?view=pingsettings')
 
-    const heading = page.getByRole('heading', { name: 'Ping 监控中心', exact: true })
+    const heading = page.getByRole('heading', { name: '延迟监测中心', exact: true })
     const returnButton = page.getByRole('button', { name: '返回首页' })
     await expect(heading).toBeVisible()
     await expect(returnButton).toBeVisible()

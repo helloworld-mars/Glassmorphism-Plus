@@ -1093,6 +1093,20 @@ test.describe('v2 multi-Ping visual baselines', () => {
     await expect(page.getByTestId(`node-binding-row-${PRIMARY_NODE_UUID}`)).toBeVisible()
     await expect(page).toHaveScreenshot('v2-ping-center-admin-desktop.png', { fullPage: false })
   })
+
+  test('visitor delay task overview keeps covered nodes readable', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await installKomariFixture(page, {
+      adminAccess: 'guest',
+      nodeCount: 6,
+      nodeCardPingFixture: { metric: 'valid', legacy: 'valid', thirdSharedTask: true },
+    })
+    await page.goto('/?view=pingsettings&pingtab=overview')
+    await page.addStyleTag({ content: UI_STABLE_STYLE })
+    await expect(page.getByTestId('ping-center-public-task-101')).toBeVisible()
+    await expect(page.getByTestId('ping-center-covered-node-101')).toHaveCount(6)
+    await expect(page).toHaveScreenshot('v2.6-delay-task-overview-desktop.png', { fullPage: false })
+  })
 })
 
 test.describe('Ping center route, access, and hidden-entry contracts', () => {
@@ -1105,8 +1119,33 @@ test.describe('Ping center route, access, and hidden-entry contracts', () => {
     await installKomariFixture(page, { adminAccess: 'guest', nodeCount: 3 })
     await page.goto('/?view=pingsettings&pingtab=overview')
     await expect(page.getByTestId('ping-center-overview')).toBeVisible()
-    await expect(page.getByTestId('ping-center-public-task-1')).toBeVisible()
+    await expect(page.getByRole('heading', { name: '延迟监测中心', exact: true })).toBeVisible()
+    await expect(page.getByTestId('ping-center-tab-overview')).toHaveText('延迟任务概览')
+    const taskCard = page.getByTestId('ping-center-public-task-1')
+    await expect(taskCard).toBeVisible()
+    await expect(taskCard.getByText('延迟', { exact: true })).toHaveCount(0)
+    await expect(taskCard.getByText('丢包', { exact: true })).toHaveCount(0)
+    await expect(page.getByTestId('ping-center-covered-nodes-1')).toContainText('覆盖节点')
+    await expect(page.getByTestId('ping-center-covered-nodes-1')).toContainText('当前公开节点中暂无覆盖。')
     expect(adminRequests).toEqual([])
+  })
+
+  test('visitor overview presents assigned nodes as bounded readable chips', async ({ page }) => {
+    await installKomariFixture(page, {
+      adminAccess: 'guest',
+      nodeCount: 3,
+      nodeCardPingFixture: { metric: 'valid' },
+    })
+    await page.goto('/?view=pingsettings&pingtab=overview')
+
+    const taskCard = page.getByTestId('ping-center-public-task-101')
+    const coveredNodes = page.getByTestId('ping-center-covered-nodes-101')
+    await expect(taskCard).toContainText('ID 101 · tcp · 60 秒')
+    await expect(taskCard).toContainText('3 台')
+    await expect(coveredNodes).toContainText('覆盖节点')
+    await expect(page.getByTestId('ping-center-covered-node-101')).toHaveCount(3)
+    await expect(coveredNodes.locator('ul')).toHaveClass(/max-h-20/)
+    await expect(coveredNodes.locator('ul')).toHaveClass(/overflow-y-auto/)
   })
 
   test('fresh visitor config access stays read-protected and never loads admin data', async ({ page }) => {
@@ -1117,6 +1156,7 @@ test.describe('Ping center route, access, and hidden-entry contracts', () => {
     })
     await installKomariFixture(page, { adminAccess: 'guest' })
     await page.goto('/?view=pingsettings&pingtab=config')
+    await expect(page.getByTestId('ping-center-tab-settings')).toHaveText('延迟任务配置')
     await expect(page.getByTestId('ping-center-settings-login-required')).toBeVisible()
     expect(adminRequests).toEqual([])
   })

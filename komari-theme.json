@@ -2,7 +2,7 @@
   "name": "Komari Glassmorphism Plus",
   "short": "glassmorphism-plus",
   "description": "A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "author": "helloworld-mars",
   "url": "https://github.com/helloworld-mars/Glassmorphism-Plus",
   "preview": "preview.png",
@@ -75,10 +75,10 @@
       { "key": "backgroundOverlay", "name": "背景遮罩强度", "type": "number", "default": 0, "help": "范围 -100 到 100；0 关闭，正数加深，负数降低透明度。" },
 
       { "name": "09 · 延迟任务绑定", "type": "title" },
-      { "key": "hidePingTaskBindingEntry", "name": "隐藏延迟任务绑定入口", "type": "switch", "default": false, "help": "开启后，首页顶部不显示“Ping 监控中心”入口；关闭时，所有访问者均可见。此开关只控制入口显示，不影响管理员通过页面地址直接管理绑定。" },
+      { "key": "hidePingTaskBindingEntry", "name": "隐藏延迟任务绑定入口", "type": "switch", "default": false, "help": "开启后，首页顶部不显示“延迟监测中心”入口；关闭时，所有访问者均可见。此开关只控制入口显示，不影响管理员通过页面地址直接管理绑定。" },
       { "key": "nodeCardPingTaskBindings", "name": "首页节点卡片延迟任务绑定", "type": "richtext", "default": "{}", "help": "兼容 v1.x 的单任务绑定，由主题内 Ping Center 自动维护，请勿手动编辑。" },
-      { "key": "nodeCardPingDisplayConfigV2", "name": "首页多 Ping 安全配置", "type": "richtext", "default": "v2:eyJzY2hlbWFWZXJzaW9uIjoyLCJnbG9iYWwiOnsiZGlzcGxheUNvdW50IjoxLCJ0YXNrSWRzIjpbXX0sIm5vZGVzIjp7fX0", "help": "兼容 v2.0.0 的只读配置，升级后由 Ping 监控中心安全迁移。" },
-      { "key": "nodeCardPingDisplayConfigV3", "name": "首页 Ping 安全配置", "type": "richtext", "default": "", "help": "由主题内 Ping 监控中心自动维护的不透明安全编码；请勿手动编辑。原始 JSON 不会在此页面暴露。" }
+      { "key": "nodeCardPingDisplayConfigV2", "name": "首页多 Ping 安全配置", "type": "richtext", "default": "v2:eyJzY2hlbWFWZXJzaW9uIjoyLCJnbG9iYWwiOnsiZGlzcGxheUNvdW50IjoxLCJ0YXNrSWRzIjpbXX0sIm5vZGVzIjp7fX0", "help": "兼容 v2.0.0 的只读配置，升级后由延迟监测中心安全迁移。" },
+      { "key": "nodeCardPingDisplayConfigV3", "name": "首页 Ping 安全配置", "type": "richtext", "default": "", "help": "由主题内延迟监测中心自动维护的不透明安全编码；请勿手动编辑。原始 JSON 不会在此页面暴露。" }
     ]
   }
 }

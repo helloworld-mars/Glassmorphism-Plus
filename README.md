@@ -35,25 +35,23 @@
 
 | 项目               | 当前状态                                                                                                               |
 | :----------------- | :--------------------------------------------------------------------------------------------------------------------- |
-| 当前 Plus 版本     | **v2.5.0**                                                                                                             |
+| 当前 Plus 版本     | **v2.6.0**                                                                                                             |
 | 上游同步基线       | [sanrokamlan Glassmorphism v3.3.7](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases/tag/v3.3.7) |
 | 当前维护者         | [helloworld-mars](https://github.com/helloworld-mars)                                                                  |
 | 适用平台           | [Komari Monitor](https://github.com/komari-monitor/komari)                                                             |
 | 已验证 Komari 版本 | **1.4.3**                                                                                                              |
 | 技术栈             | Vue 3、TypeScript、Vite 7、Tailwind CSS 4、Pinia、ECharts、Bun                                                         |
-| 源码发布           | GitHub `main` 与 `v2.5.0` Release；Release 默认附加唯一、已验证的客户安装包                                            |
+| 源码发布           | GitHub `main` 与 `v2.6.0` Release；Release 默认附加唯一、已验证的客户安装包                                            |
 | 本地安装包         | `<version>/Glassmorphism-Plus-release-<version>.zip`                                                                   |
 
 Glassmorphism Plus 是独立维护的 Glassmorphism 衍生主题，Plus 使用自己的版本体系；上游 v3.3.7 仅代表当前同步基线，并非 Plus 的版本号。同步来源、选择性合并和署名详见 [UPSTREAM.md](UPSTREAM.md)。
 
-### ✨ 最新版本 · v2.5.0
+### ✨ 最新版本 · v2.6.0
 
-- 修复首页 Ping 时间轴，20 个历史格统一采用对齐的三分钟时间区间。
-- 优化 Ping 提示信息，同时展示固定时间段与真实采样时间。
-- 未完成采样格在得到真实结果前保持隐藏，避免“等待采样”占据历史趋势。
-- 重构 iPhone 与其他移动端的价值／费用明细布局。
-- 修复 Komari 1.4.x 生产环境 JSON-RPC 路径问题，恢复首页节点与总览数据加载。
-- 加强 RPC、网络与初始化错误分类，并保持 Ping／汇率等可选功能故障隔离。
+- 统一延迟监测中心、延迟任务概览与延迟任务配置文案。
+- 延迟任务概览卡片移除冗余的延迟／丢包摘要，突出任务信息与节点覆盖关系。
+- 覆盖节点使用自动换行胶囊标签，并为长列表提供有界滚动，提升可读性且不撑坏卡片。
+- 本版不改动首页节点卡片、三网监控、时间 bucket、Tooltip、绑定或 API／RPC 行为。
 
 ---
 
@@ -61,7 +59,7 @@ Glassmorphism Plus 是独立维护的 Glassmorphism 衍生主题，Plus 使用�
 
 在保留原始 Glassmorphism 视觉基础的同时，Plus 重点维护以下能力：
 
-- 以节点 UUID 为中心，为首页卡片显示单个任务或固定三行的三网任务；统一 Ping 监控中心位于 `pingsettings`。
+- 以节点 UUID 为中心，为首页卡片显示单个任务或固定三行的三网任务；统一延迟监测中心位于 `pingsettings`。
 - 支持全局三网监控开关、每服务器继承全局／单独配置，以及严格任务交集下的多服务器批量配置。
 - 任务目录、配置解析、分组查询、精确 pair fallback、缓存与共享刷新器组成同一数据管线；单任务失败不会阻塞其他任务。
 - 指定任务的 Metric 与同任务 Legacy 保持严格的节点／任务归属验证；有效 selected task 不会被 aggregate 数据冒充。
@@ -89,7 +87,7 @@ Glassmorphism Plus 是独立维护的 Glassmorphism 衍生主题，Plus 使用�
 
 - 每张首页节点卡只采用单任务或三网监控模式；三网模式始终保留三行几何结构，未覆盖或失效任务不会被折叠。
 - 候选任务必须真实包含该节点 UUID，重复、未分配或失效任务会被明确拦截或标记，不会由聚合结果冒充。
-- 全局默认、单服务器单独配置和批量配置均由统一 Ping 监控中心管理；批量候选取所选服务器的严格 task 交集。
+- 全局默认、单服务器单独配置和批量配置均由统一延迟监测中心管理；批量候选取所选服务器的严格 task 交集。
 - 每个任务条明确标示延迟与丢包，并各保留 20 个固定宽高时间桶；数值、hover、focus 和 tooltip 只改变颜色或提示，不改变双轨几何。
 - 100% 丢包只显示一次 `丢包 100%`，延迟明确显示 `延迟 -`；延迟轨使用不可达状态，丢包轨使用红色满丢包状态。
 - 延迟、丢包与趋势条来自同一节点／任务 pair；Metric 批量查询不支持时才降级为精确 pair 请求，同任务 Legacy 是最后的数据 fallback。
@@ -132,7 +130,7 @@ Glassmorphism Plus 是独立维护的 Glassmorphism 衍生主题，Plus 使用�
 ### 主题配置
 
 - Komari managed theme 配置，无需修改源码即可调整布局、卡片、图表、背景和隐私选项。
-- `pingsettings` Ping 监控中心提供公开概览及管理员设置页，采用简体中文主筛选、可点击覆盖状态、紧凑节点列表和批量操作，不要求手写任务 ID。
+- `pingsettings` 延迟监测中心提供公开概览及管理员设置页，采用简体中文主筛选、可点击覆盖状态、紧凑节点列表和批量操作，不要求手写任务 ID。
 - v3 配置使用不透明、版本化的 `nodeCardPingDisplayConfigV3`，记录全局三网模式、三个任务槽与节点单独配置；保存前会重新读取最新 settings，并只合并本功能 key。
 - v2.0 的 `displayCount=1` 迁移为单任务模式，`displayCount=3` 迁移为三网模式，`displayCount=2` 迁移为保留前两项且第三项留空的待补全三网模式；迁移不会猜测或删除任务。
 - 旧 `nodeCardPingTaskBindings` 与 `nodeCardPingDisplayConfigV2` 原值均会保留，升级不要求重新配置，也保留降级读取能力；关闭三网监控只隐藏任务 2／3，不删除其 ID。
@@ -145,7 +143,7 @@ Glassmorphism Plus 是独立维护的 Glassmorphism 衍生主题，Plus 使用�
 
 ### 重要说明
 
-- **v2.5.0 GitHub Release 默认附加且只附加一个已验证的 installer asset：** `Glassmorphism-Plus-release-2.5.0.zip`。
+- **v2.6.0 GitHub Release 默认附加且只附加一个已验证的 installer asset：** `Glassmorphism-Plus-release-2.6.0.zip`。
 - GitHub 自动生成的 **Source code (zip)** 是源码快照，**不是** Komari 可安装主题包。
 - Komari 的远程仓库导入流程应使用正式 Release 中的 installer asset；仍不要用 GitHub 自动生成的源码压缩包代替。
 
@@ -226,12 +224,19 @@ bun run release:prepare
 
 ## 📝 版本历史
 
-当前版本更新见上方「最新版本 · v2.5.0」。
+当前版本更新见上方「最新版本 · v2.6.0」。
 
 <details>
 <summary><strong>📚 查看历史版本更新</strong></summary>
 
 <br>
+
+### v2.5.0
+
+- 统一首页 Ping 为固定 20 个三分钟时间区间，并同时展示固定区间与真实采样时间。
+- 隐藏未完成采样格的交互与 Tooltip，避免把等待状态误作历史数据。
+- 重构移动端价值与费用明细，并修复 Komari 1.4.x 生产环境 JSON-RPC 基址。
+- 加强 RPC、网络与初始化错误分类，保持可选功能故障隔离。
 
 ### v2.3.1
 

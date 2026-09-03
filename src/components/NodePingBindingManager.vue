@@ -713,7 +713,7 @@ onBeforeUnmount(() => {
         <div class="flex items-center gap-2">
           <Icon icon="tabler:activity-heartbeat" class="shrink-0 text-selection" width="24" height="24" />
           <h1 class="text-2xl font-bold tracking-tight">
-            Ping 监控中心
+            延迟监测中心
           </h1>
         </div>
         <p class="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
@@ -727,10 +727,10 @@ onBeforeUnmount(() => {
 
     <div class="mb-5 flex w-fit max-w-full gap-1 overflow-x-auto rounded-lg border border-border/60 bg-background/55 p-1 backdrop-blur-sm" data-testid="ping-center-tabs">
       <button type="button" class="rounded-md px-3 py-1.5 text-sm transition-colors" :class="activeTab === 'overview' ? 'bg-background text-selection shadow-sm' : 'text-muted-foreground hover:text-foreground'" data-testid="ping-center-tab-overview" @click="switchTab('overview')">
-        Ping 监控概览
+        延迟任务概览
       </button>
       <button v-if="appStore.isLoggedIn || activeTab === 'config'" type="button" class="rounded-md px-3 py-1.5 text-sm transition-colors" :class="activeTab === 'config' ? 'bg-background text-selection shadow-sm' : 'text-muted-foreground hover:text-foreground'" data-testid="ping-center-tab-settings" @click="switchTab('config')">
-        首页 Ping 配置
+        延迟任务配置
       </button>
     </div>
 
@@ -778,7 +778,7 @@ onBeforeUnmount(() => {
         </Empty>
       </div>
       <div v-else-if="publicTaskRows.length" class="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
-        <article v-for="row in publicTaskRows" :key="row.task.id" class="rounded-lg border border-border/60 bg-background/55 p-4 shadow-xs backdrop-blur-sm" :data-testid="`ping-center-public-task-${row.task.id}`">
+        <article v-for="row in publicTaskRows" :key="row.task.id" class="flex h-full flex-col rounded-lg border border-border/60 bg-background/55 p-4 shadow-xs backdrop-blur-sm" :data-testid="`ping-center-public-task-${row.task.id}`">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <h2 class="truncate font-medium">
@@ -790,20 +790,25 @@ onBeforeUnmount(() => {
               {{ row.assignedNodes.length }} 台
             </Badge>
           </div>
-          <div class="mt-3 grid grid-cols-2 gap-2 rounded-md bg-muted/35 p-3 text-sm">
-            <div>
-              <span class="text-muted-foreground">延迟</span><div class="mt-0.5 font-medium tabular-nums">
-                {{ row.task.latest ?? row.task.avg ?? '—' }} ms
-              </div>
-            </div><div>
-              <span class="text-muted-foreground">丢包</span><div class="mt-0.5 font-medium tabular-nums">
-                {{ Number.isFinite(row.task.loss) ? `${row.task.loss.toFixed(2)}%` : '—' }}
-              </div>
+          <div class="mt-4 rounded-md border border-border/45 bg-muted/25 p-3" :data-testid="`ping-center-covered-nodes-${row.task.id}`">
+            <div class="mb-2 flex items-center justify-between gap-3 text-xs">
+              <span class="flex items-center gap-1.5 font-medium text-foreground">
+                <Icon icon="tabler:server-2" class="shrink-0 text-selection" width="14" height="14" />
+                覆盖节点
+              </span>
+              <span class="shrink-0 text-muted-foreground">共 {{ row.assignedNodes.length }} 台</span>
             </div>
+            <ul v-if="row.assignedNodes.length" class="flex max-h-20 flex-wrap gap-1.5 overflow-y-auto pr-1" :aria-label="`${row.task.name} 覆盖节点`">
+              <li v-for="node in row.assignedNodes" :key="node.uuid" class="min-w-0 max-w-full">
+                <Badge variant="secondary" class="max-w-full bg-background/70 text-foreground shadow-none" :data-testid="`ping-center-covered-node-${row.task.id}`">
+                  <span class="truncate" :title="node.name">{{ node.name }}</span>
+                </Badge>
+              </li>
+            </ul>
+            <p v-else class="text-xs leading-5 text-muted-foreground">
+              当前公开节点中暂无覆盖。
+            </p>
           </div>
-          <p class="mt-3 line-clamp-2 text-xs leading-5 text-muted-foreground">
-            {{ row.assignedNodes.length ? row.assignedNodes.map(node => node.name).join('、') : '当前公开节点中暂无覆盖。' }}
-          </p>
         </article>
       </div>
       <div v-else class="rounded-lg border border-border/60 bg-background/50">

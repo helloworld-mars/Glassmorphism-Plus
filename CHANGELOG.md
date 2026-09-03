@@ -2,6 +2,19 @@
 
 本文件只记录 **Glassmorphism Plus** 自己的发行版本。原始 Glassmorphism 的版本历史请查看[上游仓库](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases)；Plus 的选择性同步记录见 [UPSTREAM.md](UPSTREAM.md)。
 
+## [2.6.0] - 2026-09-04
+
+### Changed
+
+- 将公开 Ping 页面文案统一为“延迟监测中心”“延迟任务概览”和“延迟任务配置”。
+- 延迟任务概览卡片移除冗余的延迟／丢包摘要，只保留任务名称、ID、类型、间隔、覆盖数量与覆盖节点。
+- 覆盖节点改为带标题的自动换行胶囊标签列表；长列表使用有界滚动，避免撑坏任务卡片并保留全部节点信息。
+
+### Compatibility
+
+- 本版仅调整延迟任务概览页面与对应入口文案；首页节点卡片、三网监控、延迟／丢包 bucket、Tooltip、任务绑定、API／RPC 与指标读取逻辑保持不变。
+- 继续兼容 Komari `1.4.3`，未增加生产依赖。
+
 ## [2.5.0] - 2026-09-03
 
 ### Hotfix
