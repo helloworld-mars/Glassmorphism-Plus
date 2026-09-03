@@ -618,7 +618,8 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
     const pingRequests: string[] = []
     page.on('request', (request) => {
       const body = request.postData() ?? ''
-      if (request.url().includes('/api/rpc2') && (/ping\.|PingMetric|PingRecords/u).test(body))
+      const rpcPath = new URL(request.url()).pathname.replace(/\/+$/u, '')
+      if (rpcPath.endsWith('/rpc2') && (/ping\.|PingMetric|PingRecords/u).test(body))
         pingRequests.push(body)
     })
     await page.setViewportSize({ width: 1440, height: 900 })
