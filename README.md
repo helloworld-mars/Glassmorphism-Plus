@@ -44,7 +44,16 @@
 | 源码发布           | GitHub `main` 与 `v2.5.0` Release；Release 默认附加唯一、已验证的客户安装包                                            |
 | 本地安装包         | `<version>/Glassmorphism-Plus-release-<version>.zip`                                                                   |
 
-Glassmorphism Plus 是独立维护的衍生主题。v2.5.0 让首页 Ping 的三分钟固定 bucket 与真实样本时刻同时可读，隐藏未完成采集槽的命中区，并为 iPhone 重构价值与费用明细；上游 v3.3.7 是同步基线，不是 Plus 的当前版本。同步来源、取舍和署名详见 [UPSTREAM.md](UPSTREAM.md)。
+Glassmorphism Plus 是独立维护的 Glassmorphism 衍生主题，Plus 使用自己的版本体系；上游 v3.3.7 仅代表当前同步基线，并非 Plus 的版本号。同步来源、选择性合并和署名详见 [UPSTREAM.md](UPSTREAM.md)。
+
+### ✨ 最新版本 · v2.5.0
+
+- 修复首页 Ping 时间轴，20 个历史格统一采用对齐的三分钟时间区间。
+- 优化 Ping 提示信息，同时展示固定时间段与真实采样时间。
+- 未完成采样格在得到真实结果前保持隐藏，避免“等待采样”占据历史趋势。
+- 重构 iPhone 与其他移动端的价值／费用明细布局。
+- 修复 Komari 1.4.x 生产环境 JSON-RPC 路径问题，恢复首页节点与总览数据加载。
+- 加强 RPC、网络与初始化错误分类，并保持 Ping／汇率等可选功能故障隔离。
 
 ---
 
@@ -217,15 +226,121 @@ bun run release:prepare
 
 ## 📝 版本历史
 
-v2.5.0 的用户可见重点：
+当前版本更新见上方「最新版本 · v2.5.0」。
 
-- 首页每条 Ping 轨使用对齐的 20 个三分钟半开 bucket，所有节点和任务共享同一小时窗口。
-- Bucket Tooltip 同时显示固定区间、延迟、丢包和最新真实样本时刻；乱序、去重与迟到样本仍保留原时间。
-- OPEN / PENDING 槽在未获得可确认结果前保留固定几何但不可见、不可交互；真实结果、确认不可达／缺失／错误仍可查看。
-- 价值与费用明细在 iPhone 与横屏小屏上使用 safe-area、固定标题、内部纵向滚动、响应式控件和移动卡片；桌面固定账单表保持不变。
-- 计费算法、API/schema、Metric/Legacy fallback、有限重试、heartbeat、cleanup 和 late backfill 均未改动。
+<details>
+<summary><strong>📚 查看历史版本更新</strong></summary>
 
-完整 Plus 历史见 [CHANGELOG.md](CHANGELOG.md)。上游来源与选择性同步记录见 [UPSTREAM.md](UPSTREAM.md)。GitHub 发布记录见 [Releases](https://github.com/helloworld-mars/Glassmorphism-Plus/releases)。
+<br>
+
+### v2.3.1
+
+- 新增不可达 Ping 目标的独立严重故障状态。
+- 明确区分完全断线与高延迟／部分丢包。
+- 使用即时自定义 Tooltip 替代浏览器原生 Ping Tooltip。
+- 优化三位数延迟与 100% 丢包的显示空间。
+- Release 开始提供经过校验的客户安装 ZIP。
+
+### v2.3.0（预发布）
+
+- 优化 Ping 延迟与丢包颜色等级。
+- 避免正常跨区域高延迟被错误显示为严重故障。
+- 重构 NodeCard 延迟／丢包标签和趋势轨道。
+- 优化不可达任务与 100% 丢包状态。
+- 保持固定 20 格趋势布局。
+
+### v2.2.0（预发布）
+
+- 加粗并固定 Ping 延迟／丢包历史格尺寸。
+- 修复数值、hover、focus 和 Tooltip 导致历史格变形。
+- 优化 100% 丢包、不可达及异常状态。
+- 改善三网监控开关布局、无障碍与草稿／保存交互。
+- 简化单节点继承配置，移除重复入口。
+
+### v2.1.0（预发布）
+
+- 将首页 Ping 配置简化为单任务／三网监控。
+- 优化三网节点卡片的延迟、丢包和状态展示。
+- 改进 Ping 监控中心、筛选、单节点与批量配置。
+- Ping 配置界面统一使用简体中文。
+- 增加 v2.0 多任务设置兼容迁移。
+
+### v2.0.0（预发布）
+
+- 重构首页 Ping 数据读取、缓存与刷新流程。
+- 首页节点卡支持最多三项 Ping 任务。
+- 增加全局默认、单节点覆盖及批量服务器配置。
+- 四种节点卡片尺寸适配多 Ping 布局。
+- 自动兼容旧 v1.x 单任务绑定。
+
+### v1.4.0
+
+- 选择性同步上游 Glassmorphism v3.3.6 与 v3.3.7。
+- 平铺地图遵循 Plus 的总览卡片选择和顺序。
+- 累计上传／下载历史在降采样时保留计数器语义。
+- 重整 Plus 版本、兼容性与上游署名文档。
+
+### v1.3.6
+
+- 修复 Komari Metric Store 中 30 天 Ping 图表历史覆盖不完整。
+- 增加感知数据留存周期的多层 Ping 历史合并。
+- 保留真实缺口与原始样本，并加强 Komari 1.4.x 汇总兼容性。
+
+### v1.3.5
+
+- 修复 30 天 Ping 范围被后端部分日级汇总压缩成约 7 天的问题。
+- 防止断连边界的失败探测被平均成虚假低延迟。
+- 保留 7／14 天范围、平滑峰值、每节点 Ping 绑定与运行指标行为。
+
+### v1.3.4
+
+- 恢复模态视图和节点详情中的 Ping 峰值平滑控制。
+- 增加 7 天与 14 天 Ping 图表范围。
+- 修复 iPhone Safari 底部黑边与 safe-area 问题。
+- 提升移动端 Ping 弹窗和图表稳定性。
+
+### v1.3.3（预发布）
+
+- 区分等待采样、真实数据与确认缺失状态。
+- 支持迟到 Ping 数据自动回填。
+- 改善 NodeCard 与详情页的数据同步、冷启动和无痕模式表现。
+- 保留 100% 丢包、20 格趋势与每节点独立 Ping 任务语义。
+
+### v1.3.2
+
+- 调整 Ping 面板和移动端布局对齐。
+- 稳定 NodeCard Ping 趋势条的几何和状态呈现。
+- 统一版本化 publish、release snapshot 与客户安装包准备路径。
+
+### v1.3.1
+
+- 修正旧快照和不同任务缓存串用。
+- 避免任务切换后显示过期 Ping 结果。
+- 加强 managed theme 选择控件与卡片趋势条几何一致性。
+
+### 1.3.0
+
+- 选择性同步上游 Glassmorphism v3.3.4 与 v3.3.5。
+- 修复指定 Ping 任务 100% 丢包时错误回退聚合数据。
+- 优化首页延迟／丢包加载、缓存与自动刷新。
+- 统一 Ping 任务顺序，并继续完善每节点独立任务绑定。
+
+### 1.2.1
+
+- 加入以节点 UUID 为中心的每节点 Ping 任务绑定。
+- 候选任务按后端 `task.clients` 关系过滤。
+- 首页按节点读取指定任务，并在绑定失效时回退原聚合数据。
+- 改善数据加载速度和自动更新体验。
+
+### 1.2（测试版）
+
+- 这是 Glassmorphism Plus 的早期测试 Release。
+- 在原版 Komari Glassmorphism 主题基础上继续开发。
+- 保留对原作者 [sanrokamlan-prog](https://github.com/sanrokamlan-prog) 的署名。
+
+</details>
+
+完整版本记录请查看 [CHANGELOG.md](CHANGELOG.md) 与 [GitHub Releases](https://github.com/helloworld-mars/Glassmorphism-Plus/releases)。上游来源与选择性同步记录见 [UPSTREAM.md](UPSTREAM.md)。
 
 ---
 
