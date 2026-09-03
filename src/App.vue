@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
@@ -18,6 +18,25 @@ useVisitorPageAudit()
 
 const isReady = ref(false)
 const isRetryingConnection = ref(false)
+const connectionErrorCopy = computed(() => {
+  switch (appStore.connectionErrorKind) {
+    case 'network':
+      return {
+        title: '网络连接错误',
+        description: '无法连接服务器，请检查网络后重试。',
+      }
+    case 'initialization':
+      return {
+        title: '主题初始化错误',
+        description: '主题初始化失败，请刷新或稍后重试。',
+      }
+    default:
+      return {
+        title: 'RPC 服务错误',
+        description: '服务器 RPC 返回错误，请稍后重试。',
+      }
+  }
+})
 
 watch(() => appStore.siteName, (siteName) => {
   document.title = siteName
@@ -86,8 +105,8 @@ onUnmounted(() => {
             <div v-if="appStore.connectionError" class="relative z-10 mx-auto max-w-[1280px] px-4 pt-4">
               <Alert variant="destructive" class="!pr-28 border-none bg-destructive/10 backdrop-blur-xs rounded-md">
                 <Icon icon="tabler:plug-connected-x" />
-                <AlertTitle>RPC 服务错误</AlertTitle>
-                <AlertDescription>连接服务器失败，请检查网络后重试。</AlertDescription>
+                <AlertTitle>{{ connectionErrorCopy.title }}</AlertTitle>
+                <AlertDescription>{{ connectionErrorCopy.description }}</AlertDescription>
                 <AlertAction class="top-1/2 -translate-y-1/2">
                   <Button size="sm" variant="outline" :disabled="isRetryingConnection" @click="retryConnection">
                     <Icon :icon="isRetryingConnection ? 'tabler:loader-2' : 'tabler:refresh'" :class="isRetryingConnection && 'animate-spin'" />

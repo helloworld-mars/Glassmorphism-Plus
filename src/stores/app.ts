@@ -894,6 +894,7 @@ const useAppStore = defineStore('app', () => {
   const authStatus = ref(getAuthSession().status)
   const privateFeaturesAllowed = computed(() => authStatus.value === 'authenticated')
   const connectionError = ref<boolean>(false)
+  const connectionErrorKind = ref<'network' | 'rpc' | 'initialization' | null>(null)
   const homeAdvancedToolsVisible = ref(false)
   const favoriteNodeIdSet = computed(() => new Set(
     (Array.isArray(favoriteNodeIds.value) ? favoriteNodeIds.value : [])
@@ -1379,6 +1380,7 @@ const useAppStore = defineStore('app', () => {
     publicSettings,
     siteName,
     connectionError,
+    connectionErrorKind,
     homeScrollPosition,
     updateThemeMode,
     updateLoginState,

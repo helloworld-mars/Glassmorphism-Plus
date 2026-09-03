@@ -35,6 +35,13 @@ const DEFAULT_CONFIG: Required<InitConfig> = {
   postFailureThreshold: REALTIME_CONFIG.polling.postFailureThreshold,
 }
 
+function classifyConnectionError(error: unknown): 'network' | 'rpc' | 'initialization' {
+  if (error instanceof RpcError) {
+    return error.code === -32000 || error.code === -32001 ? 'network' : 'rpc'
+  }
+  return 'initialization'
+}
+
 const CLIENTS_REFRESH_INTERVAL_MS = REALTIME_CONFIG.polling.clientsRefreshInterval
 
 /** 初始化状态管理 */
@@ -92,6 +99,7 @@ class InitManager {
     catch (error) {
       console.error('[InitManager] Initialization failed:', error)
       this.appStore.connectionError = true
+      this.appStore.connectionErrorKind = 'initialization'
       throw error
     }
     finally {
@@ -116,6 +124,9 @@ class InitManager {
 
     const nodesAvailable = nodesResult.status === 'fulfilled'
     this.appStore.connectionError = !nodesAvailable
+    this.appStore.connectionErrorKind = nodesAvailable
+      ? null
+      : classifyConnectionError(nodesResult.reason)
 
     if (nodesAvailable) {
       this.postFailureCount = 0
@@ -421,6 +432,7 @@ class InitManager {
       // 连接恢复正常，重置错误状态
       this.postFailureCount = 0
       this.appStore.connectionError = false
+      this.appStore.connectionErrorKind = null
     }
     catch (error) {
       if (error instanceof RpcError) {
@@ -432,6 +444,8 @@ class InitManager {
 
       this.postFailureCount += 1
       this.appStore.connectionError = this.postFailureCount >= this.config.postFailureThreshold
+      if (this.appStore.connectionError)
+        this.appStore.connectionErrorKind = classifyConnectionError(error)
     }
     finally {
       this.isPolling = false
