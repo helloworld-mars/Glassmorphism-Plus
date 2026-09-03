@@ -2,6 +2,20 @@
 
 本文件只记录 **Glassmorphism Plus** 自己的发行版本。原始 Glassmorphism 的版本历史请查看[上游仓库](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases)；Plus 的选择性同步记录见 [UPSTREAM.md](UPSTREAM.md)。
 
+## [2.3.1] - 2026-09-03
+
+### Changed
+
+- 为同一真实样本中 `latency = null` 且 `loss = 100%` 的明确不可达状态加入独立强错误红色；严重高延迟或部分丢包继续使用 critical degradation 色，不再与完全不可达同色。
+- 移除 NodeCard Ping 任务条原生 `title`，任务摘要统一由信息图标触发即时 portal Tooltip，并支持 hover、focus、点击／触摸、Esc、外部点击与 viewport 碰撞处理。
+- 时间桶改用同一自定义 Tooltip 系统，标签／数值 grid 可完整容纳三位数延迟、100% 丢包、不可达、缺失、等待与更新失败状态。
+- task header 使用稳定 grid，为任务名、延迟、丢包和信息图标保留独立空间；四种卡片尺寸的单任务／三网模式继续保持双轨各 20 格固定几何。
+
+### Compatibility and release
+
+- 既有 task identity、Metric／Legacy 查询、归一化、缓存、fallback、timer、scheduler 与 subscriber 均未改写；Tooltip 交互不新增 RPC。
+- 正式 Release 默认上传本地已验证客户安装 ZIP 作为唯一自定义 asset；ZIP 继续留在 Git 之外，上传后须回下载并复核 SHA-256、根结构与 manifest。
+
 ## [2.3.0] - 2026-09-03
 
 ### Changed
@@ -140,6 +154,7 @@
 
 Git tags `1.0`、`1.1` 与 `1.2` 指向同一历史 commit。现有证据不足以为这三个 tag 分别重建独立、可靠的变更列表，因此这里只保留历史事实，不推测具体修复内容。
 
+[2.3.1]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.0.0...v2.1.0

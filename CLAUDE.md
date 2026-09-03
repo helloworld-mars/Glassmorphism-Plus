@@ -34,8 +34,10 @@ application.
 - bun run release:prepare verifies that installer ZIP and creates the filtered
   release snapshot. It does not create the publish clone.
 - The installer layout remains komari-theme.json, preview.png, and dist/.
-- The final customer installer stays local unless the user explicitly authorizes
-  that specific upload.
+- The final customer installer stays outside Git. A formal GitHub Release uploads
+  that exact locally verified ZIP by default as its sole custom asset unless the
+  user explicitly opts out for that version, followed by an external temporary
+  download and SHA-256/structure/manifest verification.
 
 ## Commands and testing
 

@@ -35,16 +35,16 @@
 
 | 项目               | 当前状态                                                                                                               |
 | :----------------- | :--------------------------------------------------------------------------------------------------------------------- |
-| 当前 Plus 版本     | **v2.3.0**                                                                                                             |
+| 当前 Plus 版本     | **v2.3.1**                                                                                                             |
 | 上游同步基线       | [sanrokamlan Glassmorphism v3.3.7](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases/tag/v3.3.7) |
 | 当前维护者         | [helloworld-mars](https://github.com/helloworld-mars)                                                                  |
 | 适用平台           | [Komari Monitor](https://github.com/komari-monitor/komari)                                                             |
 | 已验证 Komari 版本 | **1.4.3**                                                                                                              |
 | 技术栈             | Vue 3、TypeScript、Vite 7、Tailwind CSS 4、Pinia、ECharts、Bun                                                         |
-| 源码发布           | GitHub `main` 与 `v2.3.0` Release；Release 不附加客户安装包                                                            |
+| 源码发布           | GitHub `main` 与 `v2.3.1` Release；Release 默认附加唯一、已验证的客户安装包                                            |
 | 本地安装包         | `<version>/Glassmorphism-Plus-release-<version>.zip`                                                                   |
 
-Glassmorphism Plus 是独立维护的衍生主题。v2.3.0 延续现有 Plus，重点修正 NodeCard Ping 延迟严重度、强化双轨标签与 Tooltip，并将真实 100% 丢包明确区分为不可达；上游 v3.3.7 是同步基线，不是 Plus 的当前版本。同步来源、取舍和署名详见 [UPSTREAM.md](UPSTREAM.md)。
+Glassmorphism Plus 是独立维护的衍生主题。v2.3.1 为明确不可达加入独立的强错误红色语义，统一任务与时间桶自定义 Tooltip，并加固三位数延迟、100% 丢包和四种卡片尺寸的布局；上游 v3.3.7 是同步基线，不是 Plus 的当前版本。同步来源、取舍和署名详见 [UPSTREAM.md](UPSTREAM.md)。
 
 ---
 
@@ -136,9 +136,9 @@ Glassmorphism Plus 是独立维护的衍生主题。v2.3.0 延续现有 Plus，�
 
 ### 重要说明
 
-- **v2.3.0 GitHub Release 的 installer asset 数量为 0。** 客户安装 ZIP 只在本地生成和验证，不上传 GitHub Release。
+- **v2.3.1 GitHub Release 默认附加且只附加一个已验证的 installer asset：** `Glassmorphism-Plus-release-2.3.1.zip`。
 - GitHub 自动生成的 **Source code (zip)** 是源码快照，**不是** Komari 可安装主题包。
-- Komari 的远程仓库导入流程需要可用的 Release installer asset；因此本版不要把仓库 URL 当作可直接导入的安装地址。
+- Komari 的远程仓库导入流程应使用正式 Release 中的 installer asset；仍不要用 GitHub 自动生成的源码压缩包代替。
 
 ### 方式一：本地生成安装包
 
@@ -168,9 +168,9 @@ dist/
 
 随后在 Komari 后台进入“主题管理 → 上传主题”，选择该 ZIP 并启用 **Komari Glassmorphism Plus**。
 
-### 方式二：使用维护者单独提供的安装包
+### 方式二：使用 GitHub Release 安装包
 
-如果维护者通过可信渠道单独提供经过校验的 `Glassmorphism-Plus-release-<version>.zip`，可直接在 Komari 后台上传。请核对来源、版本与 SHA-256；不要用 GitHub 的 Source code zip 代替。
+从对应版本的 [GitHub Release](https://github.com/helloworld-mars/Glassmorphism-Plus/releases) 下载 `Glassmorphism-Plus-release-<version>.zip`，核对版本与发布记录后可直接在 Komari 后台上传。不要用 GitHub 的 Source code zip 代替。
 
 ### 升级提示
 
@@ -209,7 +209,7 @@ bun run release:prepare
 - `bun run test:visual`／`bun run test:webkit` 会先做不产出 installer 的测试构建，再运行 Playwright；除非有明确视觉变更，不要更新基准快照。
 - `bun run build` 才执行正式 production build 与版本化 Komari installer 打包，避免测试覆盖历史版本产物。
 - 首次运行浏览器测试可能需要 `bunx playwright install chromium`。
-- `bun run release:prepare` 会验证 `bun run build` 已生成的客户安装 ZIP，并建立过滤后的本地 release snapshot；这些生成物不得加入 Git 或上传 Release。
+- `bun run release:prepare` 会验证 `bun run build` 已生成的客户安装 ZIP，并建立过滤后的本地 release snapshot；两者都不得加入 Git。正式发布默认将这一个已验证 ZIP 上传为唯一自定义 Release asset，随后从 Release 回下载并复核 SHA-256、结构与 manifest。
 
 源码边界与 AI 开发规则见 [AGENTS.md](AGENTS.md)；前端目录规则见 [src/AGENTS.md](src/AGENTS.md)。
 
@@ -217,13 +217,13 @@ bun run release:prepare
 
 ## 📝 版本历史
 
-v2.3.0 的用户可见重点：
+v2.3.1 的用户可见重点：
 
-- NodeCard Ping 延迟改用 `60 / 100 / 160 / 200ms` 分级，`158–180ms` 显示为中等或偏高的黄／橙色，不再误报为严重红色；丢包保持独立严重度。
-- 延迟／丢包标签升级为固定小型标签栏；四种卡片尺寸、单任务／三任务、长任务名、深浅模式与移动端仍保留固定 20 格几何。
-- 每个 bucket 的 Tooltip 同时展示同一时间点的延迟与丢包，并明确区分等待采样、暂无采样、更新失败与真实不可达。
-- 只有真实观测到 `latency = null` 且同点 `loss = 100%` 才显示不可达红轨；补点空值、尚未采样和请求错误维持中性或错误轮廓，不伪造数据。
-- 既有 task-grouped 查询、精确 pair fallback、缓存和单一 scheduler 均未改写；显示层交互不会新增 Ping RPC、timer 或 subscriber。
+- 只有同一真实样本明确满足 `latency = null` 与 `loss = 100%` 时才使用独立强错误红色；`204 ms / 50.0%` 等严重劣化保留 critical 色，不再与完全不可达同色。
+- 任务摘要只由固定信息图标触发即时自定义 Tooltip；移除原生 `title`，并支持 hover、键盘 focus、点击／触摸、Esc、外部点击和 viewport 碰撞处理。
+- 每个 bucket 使用 portal 自定义 Tooltip，稳定容纳三位数延迟、完整丢包和中文状态；missing、pending 与 request error 不会冒充不可达。
+- task header 改用稳定 grid，为 latency、loss 与信息图标保留独立空间；mini、compact、comfortable、large 的单任务／三网组合均保持每轨 20 格。
+- 正式 Release 默认上传本地已验证客户 ZIP 作为唯一自定义 asset，并在上传后回下载复核 SHA-256、根结构和 manifest；ZIP 不进入 Git。
 
 完整 Plus 历史见 [CHANGELOG.md](CHANGELOG.md)。上游来源与选择性同步记录见 [UPSTREAM.md](UPSTREAM.md)。GitHub 发布记录见 [Releases](https://github.com/helloworld-mars/Glassmorphism-Plus/releases)。
 

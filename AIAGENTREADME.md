@@ -108,7 +108,7 @@ preview.png
 dist/
 ```
 
-`bun run release:prepare` only creates the populated `<source-parent>/<version>/Glassmorphism-Plus-release-<version>/` snapshot after verifying the ZIP. Create the sibling `Glassmorphism-Plus-publish-<version>/` separately by cloning the approved publishing repository so its `.git` history remains intact. The final customer ZIP stays local unless the user explicitly authorizes uploading that exact asset.
+`bun run release:prepare` only creates the populated `<source-parent>/<version>/Glassmorphism-Plus-release-<version>/` snapshot after verifying the ZIP. Create the sibling `Glassmorphism-Plus-publish-<version>/` separately by cloning the approved publishing repository so its `.git` history remains intact. The final customer ZIP always stays outside Git. For a formal GitHub Release, upload that exact locally verified ZIP by default as the sole custom asset unless the user explicitly opts out for that version, then download it outside the repository and reverify SHA-256, extraction, root structure, and manifest before cleanup.
 
 Vite 注入的全局常量：
 
@@ -403,8 +403,8 @@ HomeView tool button
 2. 本地跑 `bun run build`，确认生成动态版本路径的安装 ZIP。
 3. 跑 `bun run release:prepare`，建立并验证过滤后的 release snapshot。
 4. 在动态 publish 路径 clone 已核准的 GitHub target，审查后同步有效 source、提交并推送。
-5. 如需 Tag / GitHub Release，手动 dispatch workflow；不要上传 ZIP asset。已验证的最终客户 ZIP 默认只保留本地，只有用户明确授权该次上传时才处理。
-6. 查 Release tag、Release 页面与 Actions，并在 [AICACHE.md](AICACHE.md) 记录验证链接/结果。
+5. 如需 Tag / GitHub Release，手动 dispatch workflow；除非用户对该版本明确要求不上传，否则把本地已完成结构、版本、隐私和 SHA-256 验证的最终客户 ZIP 作为唯一自定义 Release asset 上传。ZIP 始终不得进入 Git。
+6. 从 Release 下载 asset 到正式仓库以外的临时目录，复核 SHA-256、可解压性、根结构和 manifest 版本，确认自定义 asset 数量恰为 1 后安全清理临时副本；将 tag、Release、Actions 和验证结果记录到 [AICACHE.md](AICACHE.md)。
 
 ## 13. 里程碑边界
 

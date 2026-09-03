@@ -1,4 +1,4 @@
-import type { Locator } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import type { NodeCardPingHistoryPoint } from '../../src/types/node-card-ping'
 import type { NodeCardMultiPingConfig } from '../../src/utils/nodeCardMultiPingConfig'
 import type { NodeCardPingConfig } from '../../src/utils/nodeCardPingConfig'
@@ -139,6 +139,10 @@ function historyPoint(value: Partial<NodeCardPingHistoryPoint> = {}): NodeCardPi
   }
 }
 
+function activeDataTooltip(page: Page): Locator {
+  return page.locator('[data-slot="data-tooltip-content"]').last()
+}
+
 test.describe('node-card Ping v2.3 presentation semantics', () => {
   test('uses the Lumina latency thresholds without treating 158-180 ms as critical', () => {
     expect([
@@ -193,7 +197,7 @@ test.describe('node-card Ping v2.3 presentation semantics', () => {
     })
     expect(isConfirmedNodeCardPingUnreachable(unreachable)).toBe(true)
     expect(latencyBucketSeverity(unreachable)).toBe('unreachable')
-    expect(lossBucketSeverity(unreachable)).toBe('critical')
+    expect(lossBucketSeverity(unreachable)).toBe('unreachable')
     expect(isConfirmedNodeCardPingUnreachable(historyPoint({ loss: 100, lossState: 'data' }))).toBe(false)
     expect(isConfirmedNodeCardPingUnreachable(historyPoint({ latencyState: 'confirmed-missing', loss: 100, lossState: 'data' }))).toBe(false)
     expect(isConfirmedNodeCardPingUnreachable({ ...unreachable, lossSampleTime: '2026-09-02T16:18:00.000Z' })).toBe(false)
@@ -505,13 +509,13 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
       const beforeInteraction = await readTaskStripGeometry(highValueStrip)
       if (!isMobile) {
         await bucket.hover()
-        await expect(bucket.getByRole('tooltip')).toBeVisible()
+        await expect(activeDataTooltip(page)).toBeVisible()
         expectFixedRailGeometry(await readTaskStripGeometry(highValueStrip), geometryCase.thickness, geometryCase.rowGap, geometryCase.bucketGap)
       }
       await bucket.focus()
-      await expect(bucket.getByRole('tooltip')).toBeVisible()
-      await expect(bucket.getByRole('tooltip')).toContainText('延迟：159 ms')
-      await expect(bucket.getByRole('tooltip')).toContainText('丢包：25.0%')
+      await expect(activeDataTooltip(page)).toBeVisible()
+      await expect(activeDataTooltip(page)).toContainText('延迟159 ms')
+      await expect(activeDataTooltip(page)).toContainText('丢包25.0%')
       expectFixedRailGeometry(await readTaskStripGeometry(highValueStrip), geometryCase.thickness, geometryCase.rowGap, geometryCase.bucketGap)
       expect(await readTaskStripGeometry(highValueStrip)).toEqual(beforeInteraction)
       await page.evaluate(() => document.documentElement.classList.add('dark'))
@@ -548,7 +552,7 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
     await expect(pendingStrip).toHaveAttribute('data-node-ping-status', 'pending')
     const pendingBucket = pendingStrip.locator('[data-node-ping-bars="latency"] > [data-node-ping-bar]').first()
     await pendingBucket.focus()
-    await expect(pendingBucket.getByRole('tooltip')).toContainText('等待采样')
+    await expect(activeDataTooltip(page)).toContainText('等待采样')
     expectFixedRailGeometry(await readTaskStripGeometry(pendingStrip), 4, 9, 2)
     const invalidStrip = card.locator('[data-node-ping-invalid-slot="2"]')
     await expect(invalidStrip.locator('[data-node-ping-state="invalid"]')).toHaveCount(40)
@@ -561,7 +565,7 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
     await expect(pendingStrip.locator('[data-node-ping-state="confirmed-missing"]')).not.toHaveCount(0)
     const missingBucket = pendingStrip.locator('[data-node-ping-state="confirmed-missing"]').first()
     await missingBucket.focus()
-    await expect(missingBucket.getByRole('tooltip')).toContainText('暂无采样')
+    await expect(activeDataTooltip(page)).toContainText('暂无采样')
     expectFixedRailGeometry(await readTaskStripGeometry(pendingStrip), 4, 9, 2)
 
     fixture.setNodeCardPingFixture({ metric: 'error', legacy: 'error' })
@@ -569,7 +573,7 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
     await expect(pendingStrip.locator('[data-node-ping-state="error"]')).toHaveCount(40)
     const errorBucket = pendingStrip.locator('[data-node-ping-state="error"]').first()
     await errorBucket.focus()
-    await expect(errorBucket.getByRole('tooltip')).toContainText('更新失败')
+    await expect(activeDataTooltip(page)).toContainText('更新失败')
     expectFixedRailGeometry(await readTaskStripGeometry(pendingStrip), 4, 9, 2)
   })
 
@@ -606,8 +610,8 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
     await expect(strip.locator('[data-node-ping-bars="latency"] > [data-node-ping-bar][data-node-ping-severity="critical"]')).not.toHaveCount(0)
     const elevatedBucket = strip.locator('[data-node-ping-bars="latency"] > [data-node-ping-bar][data-node-ping-severity="elevated"]').first()
     await elevatedBucket.focus()
-    await expect(elevatedBucket.getByRole('tooltip')).toContainText(/延迟：(170|180) ms/u)
-    await expect(elevatedBucket.getByRole('tooltip')).toContainText('丢包：0.0%')
+    await expect(activeDataTooltip(page)).toContainText(/延迟(170|180) ms/u)
+    await expect(activeDataTooltip(page)).toContainText('丢包0.0%')
   })
 
   test('tooltip, focus, responsive resize, and theme styling do not trigger extra Ping RPCs', async ({ page, isMobile }) => {
@@ -635,10 +639,10 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
     const bucket = strips.first().locator('[data-node-ping-bars="latency"] > [data-node-ping-bar]').nth(4)
     if (!isMobile) {
       await bucket.hover()
-      await expect(bucket.getByRole('tooltip')).toBeVisible()
+      await expect(activeDataTooltip(page)).toBeVisible()
     }
     await bucket.focus()
-    await expect(bucket.getByRole('tooltip')).toBeVisible()
+    await expect(activeDataTooltip(page)).toBeVisible()
     await page.setViewportSize({ width: 390, height: 844 })
     await page.evaluate(() => document.documentElement.classList.toggle('dark'))
     await page.waitForTimeout(250)
@@ -717,10 +721,10 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
     await page.goto('/')
     const strip = page.locator(`[data-node-card-uuid="${PRIMARY_NODE_UUID}"] [data-node-ping-task-id="202"]`)
     await expect(strip).toHaveAttribute('data-node-ping-status', 'data')
-    await expect(strip.locator('[data-node-ping-summary="latency"]')).toHaveText('延迟 -')
-    await expect(strip.locator('[data-node-ping-summary="loss"]')).toHaveText('丢包 100%')
+    await expect(strip.locator('[data-node-ping-summary="latency"]')).toHaveText('延迟-')
+    await expect(strip.locator('[data-node-ping-summary="loss"]')).toHaveText('丢包100%')
     await expect(strip.getByText('100% 丢包', { exact: true })).toHaveCount(0)
-    await expect(strip.locator('.node-card-ping-task-header > span.text-destructive')).toHaveCount(1)
+    await expect(strip).toHaveAttribute('data-node-ping-outage', 'true')
     const latencyBars = strip.locator('[data-node-ping-bars="latency"] > [data-node-ping-bar]')
     const lossBars = strip.locator('[data-node-ping-bars="loss"] > [data-node-ping-bar]')
     await expect(latencyBars).toHaveCount(20)
@@ -728,11 +732,11 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
     expect(await latencyBars.evaluateAll(elements => elements.every(element => element.getAttribute('data-node-ping-state') === 'unreachable'))).toBe(true)
     expect(await latencyBars.evaluateAll(elements => elements.every(element => element.getAttribute('data-node-ping-severity') === 'unreachable'))).toBe(true)
     expect(await lossBars.evaluateAll(elements => elements.every(element => element.getAttribute('data-node-ping-state') === 'data'))).toBe(true)
-    expect(await lossBars.evaluateAll(elements => elements.every(element => element.getAttribute('data-node-ping-severity') === 'critical'))).toBe(true)
+    expect(await lossBars.evaluateAll(elements => elements.every(element => element.getAttribute('data-node-ping-severity') === 'unreachable'))).toBe(true)
     const unreachableBucket = latencyBars.first()
     await unreachableBucket.focus()
-    await expect(unreachableBucket.getByRole('tooltip')).toContainText('延迟：不可达')
-    await expect(unreachableBucket.getByRole('tooltip')).toContainText('丢包：100%')
+    await expect(activeDataTooltip(page)).toContainText('延迟不可达')
+    await expect(activeDataTooltip(page)).toContainText('丢包100%')
     const geometry = await readTaskStripGeometry(strip)
     expectFixedRailGeometry(geometry, 4, 9, 2)
   })

@@ -234,6 +234,9 @@ canonical source implementation
   -> non-force push main
   -> tag/GitHub Release verification when used
   -> GitHub main verification
+  -> upload the verified customer installer as the sole custom Release asset
+  -> download the Release asset outside the repository and verify SHA-256, structure, and manifest
+  -> safely clean the temporary downloaded copy
 ```
 
 `bun run release:prepare` verifies the installer produced by the build and then
@@ -302,10 +305,19 @@ It must not contain a wrapper source directory, `src/`, `tests/`, `.git/`,
 `node_modules/`, `.env`, HAR, browser profiles, storage/auth exports, or debug
 artifacts.
 
-The final customer installer is local-only by default. Unless the user explicitly
-authorizes that specific upload, never stage, commit, push, or upload it as a
-GitHub Release asset. This rule applies only to the final customer installer, not
-to every ZIP file.
+The final customer installer always remains outside Git: never stage, commit, or
+push it to `main`. For a formal GitHub Release, upload that exact locally verified
+ZIP by default as the Release's only custom asset unless the user explicitly opts
+out for that version. Before upload, record its SHA-256 and verify its structure,
+manifest version, privacy scan, tag target, and `main` target. Never upload publish
+directories, release snapshots, test/debug artifacts, or alternate ZIPs.
+
+After upload, download the asset into a temporary directory outside every source,
+publish, and release tree. Verify the downloaded SHA-256 exactly matches the local
+installer, confirm it extracts safely, recheck the manifest version/root contract,
+and then safely clean the temporary copy. If a same-name asset already exists,
+compare content first: keep an identical asset, but do not use clobber, delete, or
+replace a differing public asset without stopping for user direction.
 
 ## 15. Artifact provenance
 
@@ -357,7 +369,9 @@ complete maintainable source, not a dist-only, release-only, installer-only, or
 local-debug repository.
 
 When GitHub Releases are used, verify the tag, target commit, release status, and
-assets. Do not upload the final customer installer without explicit authorization.
+assets. Unless the user explicitly opts out for that version, the completed
+Release must contain exactly one custom asset: the verified final customer
+installer ZIP. GitHub-generated source archives are not custom assets.
 
 ## 18. Mandatory privacy and staged-file review
 
@@ -490,7 +504,9 @@ succeeds, or an installer ZIP exists. Applicable completion gates include:
 - approved source committed and pushed;
 - GitHub `main` verified;
 - release tag/status verified when used;
-- customer installer verified locally and not uploaded unless explicitly authorized.
+- customer installer verified locally, kept outside Git, uploaded by default as
+  the sole custom Release asset unless explicitly opted out, then downloaded and
+  reverified outside the repository before temporary cleanup.
 
 If a required gate cannot be completed, report the task as blocked or partially
 verified rather than fully complete.
@@ -518,7 +534,9 @@ Every completed formal release report must state:
 17. installer size;
 18. ZIP root structure;
 19. manifest version;
-20. confirmation that the installer was not uploaded unless explicitly authorized;
+20. installer upload result or explicit opt-out, custom asset count, local and
+    downloaded SHA-256 parity, remote manifest/root verification, and temporary
+    download cleanup;
 21. origin;
 22. branch;
 23. final commit hash;

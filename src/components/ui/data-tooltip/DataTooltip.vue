@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from 'vue'
-import { computed } from 'vue'
+import { TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger } from 'reka-ui'
+import { computed, ref, useSlots } from 'vue'
 import { cn } from '@/lib/utils'
+
+defineOptions({ inheritAttrs: false })
+
+const props = withDefaults(defineProps<Props>(), {
+  placement: 'top',
+  as: 'div',
+})
 
 type DataTooltipPlacement = 'top' | 'bottom' | 'left' | 'right'
 
@@ -20,19 +28,14 @@ interface Props {
   class?: HTMLAttributes['class']
   /** 气泡的附加类 */
   contentClass?: HTMLAttributes['class']
+  /** 允许点击或触摸固定/关闭气泡 */
+  openOnClick?: boolean
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  placement: 'top',
-  as: 'div',
-})
-
-const placementClass: Record<DataTooltipPlacement, string> = {
-  top: 'bottom-full left-1/2 mb-2 -translate-x-1/2',
-  bottom: 'top-full left-1/2 mt-2 -translate-x-1/2',
-  left: 'top-1/2 right-full mr-2 -translate-y-1/2',
-  right: 'top-1/2 left-full ml-2 -translate-y-1/2',
-}
+const slots = useSlots()
+const open = ref(false)
+const pinnedByClick = ref(false)
+const hasContent = computed(() => Boolean(props.content || slots.content))
 
 const sizeStyle = computed(() => {
   const style: Record<string, string> = {}
@@ -42,26 +45,97 @@ const sizeStyle = computed(() => {
     style.height = typeof props.height === 'number' ? `${props.height}px` : props.height
   return style
 })
+
+function setOpen(value: boolean): void {
+  open.value = hasContent.value && value
+  if (!open.value)
+    pinnedByClick.value = false
+}
+
+function handlePointerEnter(event: PointerEvent): void {
+  if (event.pointerType !== 'touch')
+    setOpen(true)
+}
+
+function handlePointerLeave(event: PointerEvent): void {
+  if (event.pointerType !== 'touch' && !pinnedByClick.value)
+    setOpen(false)
+}
+
+function handleFocusIn(): void {
+  setOpen(true)
+}
+
+function handleFocusOut(event: FocusEvent): void {
+  if (pinnedByClick.value)
+    return
+  const nextTarget = event.relatedTarget
+  if (!(nextTarget instanceof Node) || !(event.currentTarget as HTMLElement).contains(nextTarget))
+    setOpen(false)
+}
+
+function handleClick(): void {
+  if (!props.openOnClick || !hasContent.value)
+    return
+  if (pinnedByClick.value) {
+    setOpen(false)
+    return
+  }
+  pinnedByClick.value = true
+  open.value = true
+}
+
+function handleOpenChange(value: boolean): void {
+  open.value = hasContent.value && value
+  if (!open.value)
+    pinnedByClick.value = false
+}
 </script>
 
 <template>
-  <component
-    :is="as"
-    data-slot="data-tooltip"
-    :class="cn('group/data-tooltip relative inline-block', props.class)"
-  >
-    <slot />
-    <span
-      v-if="content || $slots.content"
-      role="tooltip"
-      :class="cn(
-        'pointer-events-none absolute z-20 hidden rounded bg-foreground/80 p-1 text-[10px] leading-none text-background shadow-lg group-hover/data-tooltip:block group-focus-within/data-tooltip:block whitespace-normal break-words',
-        placementClass[placement],
-        props.contentClass,
-      )"
-      :style="sizeStyle"
+  <TooltipProvider :delay-duration="0" :skip-delay-duration="0" disable-hoverable-content>
+    <TooltipRoot
+      :open="open"
+      :delay-duration="0"
+      disable-hoverable-content
+      disable-closing-trigger
+      @update:open="handleOpenChange"
     >
-      <slot name="content">{{ content }}</slot>
-    </span>
-  </component>
+      <TooltipTrigger as-child>
+        <component
+          :is="as"
+          v-bind="$attrs"
+          data-slot="data-tooltip"
+          :class="cn('inline-block', props.class)"
+          @pointerenter="handlePointerEnter"
+          @pointerleave="handlePointerLeave"
+          @focusin="handleFocusIn"
+          @focusout="handleFocusOut"
+          @click.capture="handleClick"
+        >
+          <slot />
+        </component>
+      </TooltipTrigger>
+      <TooltipPortal v-if="hasContent">
+        <TooltipContent
+          role="tooltip"
+          data-slot="data-tooltip-content"
+          :side="placement"
+          :side-offset="8"
+          :collision-padding="8"
+          sticky="always"
+          position-strategy="fixed"
+          :class="cn(
+            'pointer-events-none z-50 w-fit max-w-[calc(100vw-1rem)] rounded-md border border-border bg-popover px-3 py-2 text-xs leading-4 text-popover-foreground shadow-xl',
+            props.contentClass,
+          )"
+          :style="sizeStyle"
+        >
+          <slot name="content">
+            {{ content }}
+          </slot>
+        </TooltipContent>
+      </TooltipPortal>
+    </TooltipRoot>
+  </TooltipProvider>
 </template>

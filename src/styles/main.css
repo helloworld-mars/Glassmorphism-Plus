@@ -42,6 +42,7 @@
   --ping-latency-moderate: #cbd83a;
   --ping-latency-elevated: #e2a928;
   --ping-critical: #dc2626;
+  --ping-outage: rgb(225 29 72 / 90%);
   --border: oklch(0.92 0.004 286.32);
   --input: oklch(0.92 0.004 286.32);
   --ring: oklch(0.705 0.015 286.067);
@@ -88,6 +89,7 @@
   --ping-latency-moderate: #cbd83a;
   --ping-latency-elevated: #e2a928;
   --ping-critical: #f47067;
+  --ping-outage: rgb(225 29 72 / 90%);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.552 0.016 285.938);
@@ -544,12 +546,142 @@ header {
 }
 
 .node-card-ping-task-header {
+  display: grid;
   min-height: 11px;
+  grid-template-columns: 6px minmax(0, 1fr) minmax(48px, max-content) minmax(48px, max-content) 16px;
+  align-items: center;
+  column-gap: 4px;
+}
+
+.node-card-ping-status-dot {
+  grid-column: 1;
+}
+
+.node-card-ping-status-dot-outage {
+  background-color: var(--ping-outage);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ping-outage) 40%, transparent);
+}
+
+.node-card-ping-task-identity {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  overflow: hidden;
+}
+
+.node-card-ping-task-name {
+  flex: 1 1 auto;
+}
+
+.node-card-ping-status-text {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.node-card-ping-info-tooltip,
+.node-card-ping-info-trigger {
+  width: 16px;
+  height: 16px;
+}
+
+.node-card-ping-info-tooltip {
+  position: relative;
+}
+
+.node-card-ping-info-trigger::before {
+  position: absolute;
+  inset: -4px;
+  content: '';
+}
+
+.node-card-ping-summary {
+  display: inline-grid;
+  min-width: 48px;
+  grid-template-columns: max-content max-content;
+  justify-content: end;
+  align-items: baseline;
+  column-gap: 2px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .node-card-ping-summary > span {
   font-size: 0.72em;
   opacity: 0.82;
+}
+
+.node-card-ping-summary > strong {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.node-card-ping-summary-outage {
+  color: var(--ping-outage) !important;
+  font-weight: 650;
+}
+
+.node-card-ping-task-tooltip {
+  width: min(320px, calc(100vw - 16px));
+  min-width: min(260px, calc(100vw - 16px));
+  max-width: min(360px, calc(100vw - 16px));
+  white-space: normal;
+  word-break: normal;
+}
+
+.node-card-ping-task-tooltip-name {
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.node-card-ping-task-tooltip-grid,
+.node-card-ping-bucket-tooltip-grid {
+  display: grid;
+  margin: 0;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 10px;
+  row-gap: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.node-card-ping-task-tooltip-grid dt,
+.node-card-ping-bucket-tooltip-grid dt {
+  color: var(--color-muted-foreground);
+  white-space: nowrap;
+}
+
+.node-card-ping-task-tooltip-grid dd,
+.node-card-ping-bucket-tooltip-grid dd {
+  margin: 0;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.node-card-ping-tooltip-wrap {
+  overflow-wrap: anywhere;
+  text-align: left !important;
+  white-space: normal !important;
+}
+
+.node-card-ping-bucket-tooltip {
+  width: min(172px, calc(100vw - 16px));
+  min-width: min(150px, calc(100vw - 16px));
+  white-space: normal;
+  word-break: normal;
+}
+
+.node-card-ping-tooltip-time {
+  margin-bottom: 5px;
+  font-weight: 650;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.node-card-ping-tooltip-status {
+  white-space: nowrap;
 }
 
 .node-card-ping-trend-row {
@@ -627,9 +759,20 @@ header {
   background-color: var(--ping-latency-elevated);
 }
 
-.node-card-ping-bucket-hitbox[data-node-ping-severity='critical'] > .node-card-ping-bucket-fill,
-.node-card-ping-bucket-hitbox[data-node-ping-severity='unreachable'] > .node-card-ping-bucket-fill {
+.node-card-ping-bucket-hitbox[data-node-ping-severity='critical'] > .node-card-ping-bucket-fill {
   background-color: var(--ping-critical);
+}
+
+.node-card-ping-bucket-hitbox[data-node-ping-severity='unreachable'] > .node-card-ping-bucket-fill {
+  background-color: var(--ping-outage);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ping-outage) 70%, transparent) inset;
+}
+
+.node-card-ping-trend-row[data-node-ping-trend='latency']
+  .node-card-ping-bucket-hitbox[data-node-ping-severity='unreachable']
+  > .node-card-ping-bucket-fill {
+  background-image: repeating-linear-gradient(135deg, transparent 0 2px, rgb(255 255 255 / 36%) 2px 3px);
+  opacity: 0.76;
 }
 
 .node-card-ping-bucket-hitbox[data-node-ping-severity='error'] > .node-card-ping-bucket-fill {

@@ -68,6 +68,8 @@ export function lossBucketSeverity(
   point: NodeCardPingHistoryPoint,
   requestFailed = false,
 ): NodeCardPingSeverity {
+  if (isConfirmedNodeCardPingUnreachable(point))
+    return 'unreachable'
   if (point.loss !== null)
     return classifyNodeCardLoss(point.loss)
   if (requestFailed && point.lossState === 'pending')

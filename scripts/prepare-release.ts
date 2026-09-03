@@ -513,7 +513,7 @@ function main(): void {
   console.log(`[release:prepare] Provenance matched ${installerVerification.fileCount} files and ${installerVerification.directoryCount} directories (SHA-256 ${installerVerification.installerSha256})`)
   console.log(`[release:prepare] Created release snapshot: ${releasePaths.releaseDirectory}`)
   console.log(`[release:prepare] Publish snapshot path reserved: ${releasePaths.publishDirectory}`)
-  console.log('[release:prepare] Git staging remains manual; final installer ZIP uploads require explicit user authorization.')
+  console.log('[release:prepare] Git staging remains manual; keep the installer outside Git and upload this verified ZIP by default as the sole custom Release asset unless this version explicitly opts out.')
 }
 
 const invokedScriptPath = process.argv[1] ? resolve(process.argv[1]) : ''
