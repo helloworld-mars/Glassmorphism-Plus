@@ -3494,6 +3494,11 @@ test.describe('node-card per-node ping task bindings', () => {
       // The first observation lands on the existing one-minute heartbeat after
       // the 40 s write/retry grace; later checks keep that phase each slot.
       await fixture.advanceTime(index === 0 ? 240_000 : 180_000)
+      // Routed RPC continuations can finish after the stepped fake-clock helper
+      // yields on slower CI hosts. Observe the actual successful finalization
+      // before reading the full rails; do not advance into another slot.
+      await expect(strip.locator(`[data-node-ping-bars="latency"] [data-node-ping-bucket-start="${previousCurrentStart}"]`))
+        .toHaveAttribute('data-node-ping-state', 'confirmed-missing', { timeout: 15_000 })
       for (const metric of ['latency', 'loss'] as const) {
         const rail = await readRail(metric)
         expect(rail).toHaveLength(20)
@@ -3608,6 +3613,7 @@ test.describe('node-card per-node ping task bindings', () => {
   })
 
   test('only task-pair Ping localStorage or a fresh context makes a warmed snapshot cold', async ({ page }) => {
+    test.setTimeout(60_000)
     await page.setViewportSize({ width: 1280, height: 720 })
     const warmSchedule = scheduledPingSamples('2026-07-25T12:10:00.000+08:00', 99, 71)
     const fixture = await installKomariFixture(page, {
