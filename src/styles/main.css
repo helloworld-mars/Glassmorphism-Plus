@@ -763,15 +763,8 @@ header {
   background-color: color-mix(in srgb, var(--color-muted-foreground) 15%, transparent);
 }
 
-.node-card-ping-bucket-hitbox[data-node-ping-state='pending'][data-node-ping-severity='neutral']
-  > .node-card-ping-bucket-fill {
-  background-color: transparent;
-}
-
-.node-card-ping-bucket-hitbox[data-node-ping-state='pending'] {
-  pointer-events: none;
-  opacity: 0;
-  user-select: none;
+.node-card-ping-bucket-hitbox[data-node-ping-severity='waiting'] > .node-card-ping-bucket-fill {
+  background-color: color-mix(in srgb, var(--color-muted-foreground) 15%, transparent);
 }
 
 .node-card-ping-bucket-hitbox[data-node-ping-severity='excellent'] > .node-card-ping-bucket-fill {
@@ -794,27 +787,18 @@ header {
   background-color: var(--ping-critical);
 }
 
-.node-card-ping-bucket-hitbox[data-node-ping-severity='missing'] > .node-card-ping-bucket-fill {
-  background-color: color-mix(in srgb, var(--ping-outage) 20%, transparent);
-  background-image: repeating-linear-gradient(
-    135deg,
-    transparent 0 2px,
-    color-mix(in srgb, var(--ping-outage) 62%, transparent) 2px 3px
-  );
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ping-outage) 58%, transparent) inset;
-  opacity: 0.72;
+.node-card-ping-bucket-hitbox[data-node-ping-severity='no-sample'] > .node-card-ping-bucket-fill {
+  background-color: var(--ping-outage);
+  background-image: repeating-linear-gradient(135deg, transparent 0 2px, rgb(255 255 255 / 36%) 2px 3px);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ping-outage) 70%, transparent) inset;
+  opacity: 0.76;
 }
 
 .node-card-ping-bucket-hitbox[data-node-ping-severity='unreachable'] > .node-card-ping-bucket-fill {
   background-color: var(--ping-outage);
+  background-image: none;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--ping-outage) 70%, transparent) inset;
-}
-
-.node-card-ping-trend-row[data-node-ping-trend='latency']
-  .node-card-ping-bucket-hitbox[data-node-ping-severity='unreachable']
-  > .node-card-ping-bucket-fill {
-  background-image: repeating-linear-gradient(135deg, transparent 0 2px, rgb(255 255 255 / 36%) 2px 3px);
-  opacity: 0.76;
+  opacity: 1;
 }
 
 .node-card-ping-bucket-hitbox[data-node-ping-severity='error'] > .node-card-ping-bucket-fill {

@@ -201,6 +201,10 @@ test.describe('node-card Ping v2.3 presentation semantics', () => {
     expect(isConfirmedNodeCardPingUnreachable(historyPoint({ loss: 100, lossState: 'data' }))).toBe(false)
     expect(isConfirmedNodeCardPingUnreachable(historyPoint({ latencyState: 'confirmed-missing', loss: 100, lossState: 'data' }))).toBe(false)
     expect(isConfirmedNodeCardPingUnreachable({ ...unreachable, lossSampleTime: '2026-09-02T16:18:00.000Z' })).toBe(false)
+    expect(latencyBucketSeverity(historyPoint())).toBe('waiting')
+    expect(lossBucketSeverity(historyPoint())).toBe('waiting')
+    expect(latencyBucketSeverity(historyPoint({ latencyState: 'confirmed-missing' }))).toBe('no-sample')
+    expect(lossBucketSeverity(historyPoint({ lossState: 'confirmed-missing' }))).toBe('no-sample')
     expect(latencyBucketSeverity(historyPoint(), true)).toBe('error')
     expect(lossBucketSeverity(historyPoint(), true)).toBe('error')
   })
@@ -533,7 +537,7 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
     })
   }
 
-  test('pending, missing, error, and invalid rails reuse the same fixed bucket DOM and geometry', async ({ page }) => {
+  test('waiting, no-sample, error, and invalid rails reuse the same fixed bucket DOM and geometry', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     const fixture = await installKomariFixture(page, {
       hideEarth: true,
@@ -551,11 +555,14 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
     const pendingStrip = card.locator('[data-node-ping-task-id="202"]')
     await expect(pendingStrip).toHaveAttribute('data-node-ping-status', 'pending')
     const pendingBucket = pendingStrip.locator('[data-node-ping-bars="latency"] > [data-node-ping-bar]').first()
-    await expect(pendingBucket).toHaveAttribute('aria-hidden', 'true')
-    await expect(pendingBucket).toHaveCSS('pointer-events', 'none')
-    await expect(pendingBucket).toHaveCSS('opacity', '0')
-    await pendingBucket.hover({ force: true })
-    await expect(activeDataTooltip(page)).toHaveCount(0)
+    await expect(pendingBucket).toHaveAttribute('data-node-ping-severity', 'waiting')
+    await expect(pendingBucket).not.toHaveAttribute('aria-hidden', 'true')
+    await expect(pendingBucket).toHaveCSS('pointer-events', 'auto')
+    await expect(pendingBucket).toHaveCSS('opacity', '1')
+    await expect(pendingBucket).toHaveAttribute('aria-label', /等待采样/)
+    await pendingBucket.hover()
+    await expect(activeDataTooltip(page)).toContainText('等待采样')
+    await page.keyboard.press('Escape')
     expectFixedRailGeometry(await readTaskStripGeometry(pendingStrip), 4, 9, 2)
     const invalidStrip = card.locator('[data-node-ping-invalid-slot="2"]')
     await expect(invalidStrip.locator('[data-node-ping-state="invalid"]')).toHaveCount(40)
@@ -567,6 +574,7 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
     await page.reload()
     await expect(pendingStrip.locator('[data-node-ping-state="confirmed-missing"]')).not.toHaveCount(0)
     const missingBucket = pendingStrip.locator('[data-node-ping-state="confirmed-missing"]').first()
+    await expect(missingBucket).toHaveAttribute('data-node-ping-severity', 'no-sample')
     await missingBucket.focus()
     await expect(activeDataTooltip(page)).toContainText('无采样')
     expectFixedRailGeometry(await readTaskStripGeometry(pendingStrip), 4, 9, 2)
@@ -735,7 +743,7 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
     await expect(lossBars).toHaveCount(20)
     expect(await latencyBars.evaluateAll(elements => elements.every(element => element.getAttribute('data-node-ping-state') === 'unreachable'))).toBe(true)
     expect(await latencyBars.evaluateAll(elements => elements.every(element => element.getAttribute('data-node-ping-severity') === 'unreachable'))).toBe(true)
-    expect(await lossBars.evaluateAll(elements => elements.every(element => element.getAttribute('data-node-ping-state') === 'data'))).toBe(true)
+    expect(await lossBars.evaluateAll(elements => elements.every(element => element.getAttribute('data-node-ping-state') === 'unreachable'))).toBe(true)
     expect(await lossBars.evaluateAll(elements => elements.every(element => element.getAttribute('data-node-ping-severity') === 'unreachable'))).toBe(true)
     const unreachableBucket = latencyBars.first()
     await unreachableBucket.focus()

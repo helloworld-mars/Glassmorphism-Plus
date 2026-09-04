@@ -153,6 +153,8 @@ function latencyBucketState(point: NodeCardPingHistoryPoint): string {
 }
 
 function lossBucketState(point: NodeCardPingHistoryPoint): string {
+  if (isConfirmedNodeCardPingUnreachable(point))
+    return 'unreachable'
   if (point.loss !== null)
     return 'data'
   return props.snapshot?.error && point.lossState === 'pending' ? 'error' : point.lossState
@@ -167,10 +169,6 @@ function bucketSampleTime(point: NodeCardPingHistoryPoint): string {
   return [point.latencySampleTime, point.lossSampleTime]
     .filter((value): value is string => Boolean(value))
     .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? ''
-}
-
-function isBucketInteractive(point: NodeCardPingHistoryPoint, metric: 'latency' | 'loss'): boolean {
-  return (metric === 'latency' ? latencyBucketState(point) : lossBucketState(point)) !== 'pending'
 }
 
 function barTooltip(point: NodeCardPingHistoryPoint): string {
@@ -254,7 +252,6 @@ function barTooltip(point: NodeCardPingHistoryPoint): string {
       <span class="node-card-ping-bucket-grid" data-node-ping-bars="latency">
         <template v-for="(point, index) in history" :key="`latency-${index}`">
           <DataTooltip
-            v-if="isBucketInteractive(point, 'latency')"
             as="span"
             data-node-ping-bar
             :data-node-ping-bucket-time="point.time || undefined"
@@ -286,17 +283,6 @@ function barTooltip(point: NodeCardPingHistoryPoint): string {
               </dl>
             </template>
           </DataTooltip>
-          <span
-            v-else
-            data-node-ping-bar
-            :data-node-ping-bucket-time="point.time || undefined"
-            :data-node-ping-bucket-start="point.time || undefined"
-            :data-node-ping-bucket-end="bucketEndTime(index) || undefined"
-            data-node-ping-state="pending"
-            :data-node-ping-severity="latencyBucketSeverity(point, Boolean(snapshot?.error))"
-            class="node-card-ping-bucket-hitbox"
-            aria-hidden="true"
-          ><span class="node-card-ping-bucket-fill" data-node-ping-bucket-fill /></span>
         </template>
       </span>
     </div>
@@ -305,7 +291,6 @@ function barTooltip(point: NodeCardPingHistoryPoint): string {
       <span class="node-card-ping-bucket-grid" data-node-ping-bars="loss">
         <template v-for="(point, index) in history" :key="`loss-${index}`">
           <DataTooltip
-            v-if="isBucketInteractive(point, 'loss')"
             as="span"
             data-node-ping-bar
             :data-node-ping-bucket-time="point.time || undefined"
@@ -337,17 +322,6 @@ function barTooltip(point: NodeCardPingHistoryPoint): string {
               </dl>
             </template>
           </DataTooltip>
-          <span
-            v-else
-            data-node-ping-bar
-            :data-node-ping-bucket-time="point.time || undefined"
-            :data-node-ping-bucket-start="point.time || undefined"
-            :data-node-ping-bucket-end="bucketEndTime(index) || undefined"
-            data-node-ping-state="pending"
-            :data-node-ping-severity="lossBucketSeverity(point, Boolean(snapshot?.error))"
-            class="node-card-ping-bucket-hitbox"
-            aria-hidden="true"
-          ><span class="node-card-ping-bucket-fill" data-node-ping-bucket-fill /></span>
         </template>
       </span>
     </div>

@@ -2,6 +2,20 @@
 
 本文件只记录 **Glassmorphism Plus** 自己的发行版本。原始 Glassmorphism 的版本历史请查看[上游仓库](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases)；Plus 的选择性同步记录见 [UPSTREAM.md](UPSTREAM.md)。
 
+## [2.7.2] - 2026-09-04
+
+### Fixed
+
+- 首页节点卡片的每个有效 Ping 任务现在始终渲染同一共享窗口内的 20 个三分钟 bucket；最新槽由既有窗口结构直接提供，正常与异常任务同步显示，不再因 `PENDING` 透明规则看似缺少最右一格。
+- 将既有 `PENDING` 与 `CONFIRMED_MISSING` 分别映射为独立的 `WAITING_SAMPLE`／“等待采样”和 `NO_SAMPLE`／“无采样”展示语义；旧空槽仍须在时间推进、既有写入宽限结束且成功查询覆盖后才收敛，late backfill 可原位恢复真实数据。
+- `WAITING_SAMPLE` 精确复用 v2.6.0 中性灰色 token；`NO_SAMPLE` 迁移复用 v2.7.1 原延迟不可达的红色对角斜纹、透明度与内描边；真实 `latency=null + loss=100%` 的 `UNREACHABLE` 两条轨道统一复用现有 `--ping-outage` 实心红色。
+- 当前等待 bucket 恢复既有 Tooltip 触发路径和 ARIA 文案；“等待采样”“无采样”“探测不可达”“更新失败”“任务失效”保持互不混用，空值不显示或统计为 `100%` 丢包。
+
+### Compatibility and performance
+
+- Ping RPC、请求参数、Metric／Legacy、缓存键、共享 scheduler、timer、任务绑定、长范围图表、首页卡片尺寸与双轨几何均未修改；未增加生产依赖或请求。
+- 继续兼容 Komari `1.4.3`。
+
 ## [2.7.1] - 2026-09-04
 
 ### Fixed

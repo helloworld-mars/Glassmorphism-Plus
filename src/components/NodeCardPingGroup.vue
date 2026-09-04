@@ -90,13 +90,13 @@ function handleUnavailableSlotClick(): void {
         <span class="node-card-ping-trend-row" data-node-ping-panel="latency">
           <span class="node-card-ping-trend-label" data-node-ping-header="latency">延迟</span>
           <span class="node-card-ping-bucket-grid" data-node-ping-bars="latency">
-            <span v-for="bar in placeholderBars" :key="`pending-latency-${bar}`" class="node-card-ping-bucket-hitbox" data-node-ping-bar data-node-ping-state="pending" data-node-ping-severity="neutral"><i class="node-card-ping-bucket-fill" data-node-ping-bucket-fill /></span>
+            <span v-for="bar in placeholderBars" :key="`pending-latency-${bar}`" class="node-card-ping-bucket-hitbox" data-node-ping-bar data-node-ping-state="pending" data-node-ping-severity="waiting"><i class="node-card-ping-bucket-fill" data-node-ping-bucket-fill /></span>
           </span>
         </span>
         <span class="node-card-ping-trend-row" data-node-ping-panel="loss">
           <span class="node-card-ping-trend-label" data-node-ping-header="loss">丢包</span>
           <span class="node-card-ping-bucket-grid" data-node-ping-bars="loss">
-            <span v-for="bar in placeholderBars" :key="`pending-loss-${bar}`" class="node-card-ping-bucket-hitbox" data-node-ping-bar data-node-ping-state="pending" data-node-ping-severity="neutral"><i class="node-card-ping-bucket-fill" data-node-ping-bucket-fill /></span>
+            <span v-for="bar in placeholderBars" :key="`pending-loss-${bar}`" class="node-card-ping-bucket-hitbox" data-node-ping-bar data-node-ping-state="pending" data-node-ping-severity="waiting"><i class="node-card-ping-bucket-fill" data-node-ping-bucket-fill /></span>
           </span>
         </span>
       </div>

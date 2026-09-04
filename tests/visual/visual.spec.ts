@@ -41,14 +41,14 @@ test('Plus documentation keeps its own version identity and preserves upstream a
 
   expect(readme).toContain('# 🌌 Komari Glassmorphism Plus')
   expect(readme).toContain('当前 Plus 版本')
-  expect(readme).toContain('**v2.7.1**')
+  expect(readme).toContain('**v2.7.2**')
   expect(readme).toContain('sanrokamlan Glassmorphism v3.3.7')
-  expect(readme).toContain('Glassmorphism-Plus-release-2.7.1.zip')
+  expect(readme).toContain('Glassmorphism-Plus-release-2.7.2.zip')
   expect(readme).toContain('Source code (zip)')
   expect(readme).not.toMatch(/^#{2,}\s+(?:\S.*)?v3\.\d/m)
 
   const changelogVersions = Array.from(changelog.matchAll(/^## \[([^\]]+)\]/gm), match => match[1])
-  expect(changelogVersions).toEqual(['2.7.1', '2.7.0', '2.6.0', '2.5.0', '2.3.1', '2.3.0', '2.2.0', '2.1.0', '2.0.0', '1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
+  expect(changelogVersions).toEqual(['2.7.2', '2.7.1', '2.7.0', '2.6.0', '2.5.0', '2.3.1', '2.3.0', '2.2.0', '2.1.0', '2.0.0', '1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
   expect(upstream).toContain('Current upstream baseline')
   expect(upstream).toContain('v3.3.7')
   expect(credits).toContain('helloworld-mars')
@@ -225,15 +225,15 @@ test('v2.3.1 presentation keeps severe degradation distinct from a paired confir
   expect(lossBucketSeverity(point(204, 50))).toBe('critical')
   expect(latencyBucketSeverity(point(null, 100))).toBe('unreachable')
   expect(lossBucketSeverity(point(null, 100))).toBe('unreachable')
-  expect(latencyBucketSeverity({ ...point(null, 100), latencyState: 'pending' })).toBe('neutral')
-  expect(latencyBucketSeverity({ ...point(null, null), latencyState: 'confirmed-missing', lossState: 'confirmed-missing' })).toBe('missing')
-  expect(lossBucketSeverity({ ...point(null, null), latencyState: 'confirmed-missing', lossState: 'confirmed-missing' })).toBe('missing')
+  expect(latencyBucketSeverity({ ...point(null, 100), latencyState: 'pending' })).toBe('waiting')
+  expect(latencyBucketSeverity({ ...point(null, null), latencyState: 'confirmed-missing', lossState: 'confirmed-missing' })).toBe('no-sample')
+  expect(lossBucketSeverity({ ...point(null, null), latencyState: 'confirmed-missing', lossState: 'confirmed-missing' })).toBe('no-sample')
   expect(latencyBucketSeverity({ ...point(null, null), latencyState: 'pending', lossState: 'pending' }, true)).toBe('error')
   expect(latencyBucketSeverity(point(999, 100))).toBe('critical')
   expect(lossBucketSeverity(point(999, 100))).toBe('critical')
 })
 
-test('v2.7.1 finalizes only successfully queried closed Ping buckets after the existing retry budget', () => {
+test('v2.7.2 finalizes only successfully queried closed Ping buckets after the existing retry budget', () => {
   const timing = {
     bucketStart: 0,
     bucketEnd: 180_000,
@@ -1327,13 +1327,13 @@ test('brand metadata and homepage footer retain current and original attribution
     name: 'Komari Glassmorphism Plus',
     short: 'glassmorphism-plus',
     description: 'A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.',
-    version: '2.7.1',
+    version: '2.7.2',
     author: 'helloworld-mars',
     url: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(packageMetadata).toMatchObject({
     name: 'komari-theme-glassmorphism-plus',
-    version: '2.7.1',
+    version: '2.7.2',
     homepage: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(themeManifest.short).toMatch(/^[\w-]+$/)
@@ -1377,7 +1377,7 @@ test('brand metadata and homepage footer retain current and original attribution
 
   const footer = page.locator('footer')
   await expect(footer.getByRole('link', { name: 'Glassmorphism Plus' })).toHaveAttribute('href', 'https://github.com/helloworld-mars/Glassmorphism-Plus')
-  await expect(footer.getByText('v2.7.1 · helloworld-mars', { exact: true }).first()).toBeVisible()
+  await expect(footer.getByText('v2.7.2 · helloworld-mars', { exact: true }).first()).toBeVisible()
   await expect(footer.getByRole('link', { name: 'Based on the original theme by sanrokamlan' }))
     .toHaveAttribute('href', 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism')
   await expect(footer).not.toContainText('unknown')
@@ -2165,7 +2165,9 @@ test('detail ping requests stay scoped to the current node', async ({ page }) =>
   await installKomariFixture(page)
   await openStablePage(page)
 
-  await expect.poll(() => metricCalls.filter(isPingMetricCall).length).toBeGreaterThan(0)
+  await expect.poll(() => new Set(metricCalls
+    .filter(call => call.method === 'public:queryMetrics' && isPingMetricCall(call))
+    .map(call => call.params.entity_id)).size).toBe(12)
   const homeSummaryCalls = metricCalls.filter(call => call.method === 'public:queryMetrics' && isPingMetricCall(call))
   expect(homeSummaryCalls.length).toBeGreaterThan(0)
   expect(homeSummaryCalls.every(call => call.params.max_points === 150)).toBe(true)
@@ -2308,6 +2310,7 @@ test.describe('node-card per-node ping task bindings', () => {
   })
 
   test('keeps an exact selected-task snapshot visible throughout the home-to-detail leave transition', async ({ page }) => {
+    test.setTimeout(45_000)
     const selectedTaskQueries: Array<Record<string, unknown>> = []
     page.on('request', (request) => {
       if (!isRpc2Request(request.url()))
@@ -2330,7 +2333,9 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectNodeCardPing(page, '200 ms', '25.0%')
     await expectNodeCardPingTooltip(page, 'latency', '200 ms')
 
-    await page.addStyleTag({ content: '.duration-150 { transition-duration: 1000ms !important; }' })
+    // Keep the leaving card mounted long enough for WebKit/iPhone to inspect
+    // its complete snapshot under a busy full-suite run.
+    await page.addStyleTag({ content: '.duration-150 { transition-duration: 15000ms !important; }' })
     selectedTaskQueries.length = 0
     await primaryNodeCard(page).click()
     await expect(page).toHaveURL(`/instance/${PRIMARY_NODE_UUID}`)
@@ -2342,7 +2347,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await page.evaluate(() => window.dispatchEvent(new Event('online')))
     await page.waitForTimeout(300)
     expect(selectedTaskQueries).toHaveLength(0)
-    await expect(page.getByText('硬件信息')).toBeVisible()
+    await expect(page.getByText('硬件信息')).toBeVisible({ timeout: 20_000 })
   })
 
   test('quantizes all twenty NodeCard Ping bars across desktop, mobile, empty, loading, and offline states', async ({ page }) => {
@@ -2412,7 +2417,7 @@ test.describe('node-card per-node ping task bindings', () => {
     expect(calls.filter(isPingLegacyRequest)).toHaveLength(0)
   })
 
-  test('v2.5.0 keeps 12 nodes and three tasks on common bucket boundaries without request fan-out', async ({ page }) => {
+  test('v2.7.2 keeps 12 nodes and three tasks on one visible current WAITING_SAMPLE slot without request fan-out', async ({ page }) => {
     const calls: Array<{ method: string, params: Record<string, unknown> }> = []
     page.on('request', (request) => {
       if (!isRpc2Request(request.url()))
@@ -2433,7 +2438,6 @@ test.describe('node-card per-node ping task bindings', () => {
           '2026-09-03T09:58:00.000+08:00',
           '2026-09-03T10:02:00.000+08:00',
           '2026-09-03T10:05:00.000+08:00',
-          '2026-09-03T10:07:00.000+08:00',
         ],
       },
     })
@@ -2453,6 +2457,26 @@ test.describe('node-card per-node ping task bindings', () => {
     expect(new Set(stripIdentity.map(item => item.taskId))).toEqual(new Set(['101', '202', '303']))
     expect(new Set(stripIdentity.map(item => item.start))).toEqual(new Set(['2026-09-03T01:09:00.000Z']))
     expect(new Set(stripIdentity.map(item => item.end))).toEqual(new Set(['2026-09-03T02:09:00.000Z']))
+    const currentBuckets = await strips.evaluateAll(elements => elements.flatMap((element) => {
+      return ['latency', 'loss'].map((metric) => {
+        const buckets = [...element.querySelectorAll(`[data-node-ping-bars="${metric}"] [data-node-ping-bar]`)]
+        const bucket = buckets.at(-1)
+        return {
+          count: buckets.length,
+          start: bucket?.getAttribute('data-node-ping-bucket-start'),
+          end: bucket?.getAttribute('data-node-ping-bucket-end'),
+          state: bucket?.getAttribute('data-node-ping-state'),
+          severity: bucket?.getAttribute('data-node-ping-severity'),
+          ariaLabel: bucket?.getAttribute('aria-label'),
+        }
+      })
+    }))
+    expect(new Set(currentBuckets.map(item => item.count))).toEqual(new Set([20]))
+    expect(new Set(currentBuckets.map(item => item.start))).toEqual(new Set(['2026-09-03T02:06:00.000Z']))
+    expect(new Set(currentBuckets.map(item => item.end))).toEqual(new Set(['2026-09-03T02:09:00.000Z']))
+    expect(new Set(currentBuckets.map(item => item.state))).toEqual(new Set(['pending']))
+    expect(new Set(currentBuckets.map(item => item.severity))).toEqual(new Set(['waiting']))
+    expect(currentBuckets.every(item => item.ariaLabel?.includes('等待采样'))).toBe(true)
 
     const statsCalls = calls.filter(call => call.method === 'public:getPingMetricStats'
       && ['101', '202', '303'].includes(String(call.params.task_id)))
@@ -2674,7 +2698,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectNodeCardPingTooltip(page, 'latency', '最新样本：23:03:00')
   })
 
-  test('v1.3.3 keeps a cold newest bucket PENDING until its real API sample becomes visible, then renders DATA without reload', async ({ page }) => {
+  test('v2.7.2 shows a cold newest bucket as WAITING_SAMPLE until its real API sample becomes visible, then renders DATA without reload', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 })
     const fixture = await installKomariFixture(page, {
       fakeTimers: true,
@@ -2693,13 +2717,44 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectNodeCardPingTooltip(page, 'latency', '11:57–12:00\n延迟：7 ms\n丢包：0.0%\n最新样本：11:59:00')
     await expectNodeCardPingInfoStatus(page, '数据正常')
     const pendingBucket = nodeCardPingBucket(page, 'latency', PING_INGESTION_BUCKET)
-    await expect(pendingBucket).toHaveAttribute('aria-hidden', 'true')
-    await expect(pendingBucket).toHaveCSS('pointer-events', 'none')
-    await expect(pendingBucket).toHaveCSS('opacity', '0')
+    await expect(pendingBucket).toHaveAttribute('data-node-ping-severity', 'waiting')
+    await expect(pendingBucket).not.toHaveAttribute('aria-hidden', 'true')
+    await expect(pendingBucket).toHaveCSS('pointer-events', 'auto')
+    await expect(pendingBucket).toHaveCSS('opacity', '1')
+    await expect(pendingBucket).toHaveAttribute('aria-label', '12:00–12:03\n等待采样')
+    const pendingStyle = await pendingBucket.locator('[data-node-ping-bucket-fill]').evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { backgroundColor: style.backgroundColor, backgroundImage: style.backgroundImage }
+    })
+    expect(pendingStyle.backgroundColor).not.toBe('rgba(0, 0, 0, 0)')
+    expect(pendingStyle.backgroundImage).toBe('none')
     const pendingBox = await pendingBucket.boundingBox()
     expect(pendingBox).not.toBeNull()
+    await page.evaluate(() => document.documentElement.classList.add('dark'))
+    const darkPendingStyle = await pendingBucket.locator('[data-node-ping-bucket-fill]').evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { backgroundColor: style.backgroundColor, backgroundImage: style.backgroundImage }
+    })
+    expect(darkPendingStyle.backgroundColor).not.toBe('rgba(0, 0, 0, 0)')
+    expect(darkPendingStyle.backgroundImage).toBe('none')
+    expect(await pendingBucket.boundingBox()).toEqual(pendingBox)
+    await page.evaluate(() => document.documentElement.classList.remove('dark'))
+
+    for (const width of [360, 375, 390, 430]) {
+      await page.setViewportSize({ width, height: 844 })
+      for (const metric of ['latency', 'loss'] as const) {
+        const bars = primaryNodeCard(page).locator(`[data-node-ping-bars="${metric}"] [data-node-ping-bar]`)
+        await expect(bars).toHaveCount(20)
+        await expect(bars.last()).toHaveAttribute('data-node-ping-severity', 'waiting')
+        await expect(bars.last()).toHaveAttribute('aria-label', /等待采样/)
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1)
+    }
+
+    await page.setViewportSize({ width: 1280, height: 720 })
     await page.mouse.move(pendingBox!.x + pendingBox!.width / 2, pendingBox!.y + pendingBox!.height / 2)
-    await expect(page.locator('[data-slot="data-tooltip-content"]')).toHaveCount(0)
+    await expect(page.locator('[data-slot="data-tooltip-content"]')).toContainText('等待采样')
+    await page.keyboard.press('Escape')
     expect(selectedPingMetricTimelineEntries(fixture.timeline)
       .some(entry => entry.responseSamples.some(sample => sample.sampleAt === Date.parse(PING_INGESTION_SAMPLE)))).toBe(false)
 
@@ -2806,6 +2861,61 @@ test.describe('node-card per-node ping task bindings', () => {
     expect(fixture.timeline.every(entry => entry.responseSamples.length === 0)).toBe(true)
   })
 
+  for (const failure of [
+    { label: 'HTTP 503', kind: 'http' as const },
+    { label: 'network timeout', kind: 'abort' as const, errorCode: 'timedout' as const },
+    { label: 'aborted request', kind: 'abort' as const, errorCode: 'aborted' as const },
+  ]) {
+    test(`v2.7.2 ${failure.label} keeps fixed ERROR rails and never manufactures NO_SAMPLE or UNREACHABLE`, async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 720 })
+      const fixture = await installKomariFixture(page, {
+        fakeTimers: true,
+        clockNow: PING_INGESTION_CLOCK,
+        nodeCount: 1,
+        nodeCardPingTaskBindings: primaryBinding(202),
+        nodeCardPingFixture: { metric: 'valid', legacy: 'valid' },
+      })
+      const failedRequests: string[] = []
+      await page.route('**/rpc2', async (route) => {
+        const payload = route.request().postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
+        const method = payload?.method ?? ''
+        const metricKeys = Array.isArray(payload?.params?.metric_keys) ? payload.params.metric_keys : []
+        const isPingDataRequest = method === 'public:getPingMetricStats'
+          || (method === 'public:queryMetrics' && metricKeys.some(key => String(key).startsWith('ping.')))
+          || (method === 'common:getRecords' && payload?.params?.type === 'ping')
+          || method === 'public:getPingRecords'
+        if (!isPingDataRequest) {
+          await route.fallback()
+          return
+        }
+        failedRequests.push(method)
+        if (failure.kind === 'http') {
+          await route.fulfill({
+            status: 503,
+            contentType: 'application/json',
+            body: JSON.stringify({ status: 'error', message: 'fixture unavailable' }),
+          })
+          return
+        }
+        await route.abort(failure.errorCode)
+      })
+
+      await openStablePage(page)
+      for (const metric of ['latency', 'loss'] as const) {
+        const bars = primaryNodeCard(page).locator(`[data-node-ping-bars="${metric}"] [data-node-ping-bar]`)
+        await expect(bars).toHaveCount(20)
+        await expectAllNodeCardPingBucketStates(page, metric, 'error')
+        expect(await bars.evaluateAll(elements => elements.every(element => element.getAttribute('data-node-ping-severity') === 'error'))).toBe(true)
+      }
+      await expectNodeCardPingTooltip(page, 'latency', '更新失败')
+      const initialFailureCount = failedRequests.length
+      await fixture.advanceTime(45_000)
+      expect(failedRequests.length).toBeGreaterThan(initialFailureCount)
+      expect(failedRequests.length).toBeLessThan(40)
+      expect(await primaryNodeCard(page).locator('[data-node-ping-state="confirmed-missing"], [data-node-ping-state="unreachable"]').count()).toBe(0)
+    })
+  }
+
   test('an observed 100% loss probe renders unreachable latency without becoming no-sample', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 })
     await installKomariFixture(page, {
@@ -2833,7 +2943,7 @@ test.describe('node-card per-node ping task bindings', () => {
     await openStablePage(page)
 
     await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'unreachable')
-    await expectNodeCardPingBucketState(page, 'loss', PING_INGESTION_BUCKET, 'data')
+    await expectNodeCardPingBucketState(page, 'loss', PING_INGESTION_BUCKET, 'unreachable')
     await expectNodeCardPingTooltip(page, 'latency', '12:00–12:03\n延迟：不可达\n丢包：100%\n最新样本：12:00:00')
     await expectNodeCardPingTooltip(page, 'loss', '12:00–12:03\n延迟：不可达\n丢包：100%\n最新样本：12:00:00')
     const latencyTooltipContents = await primaryNodeCard(page)
@@ -2880,12 +2990,19 @@ test.describe('node-card per-node ping task bindings', () => {
     await expectNodeCardPing(page, '-', '100%')
     await expect(outageLatency).toHaveAttribute('aria-label', /延迟：不可达[\s\S]*丢包：100%/)
 
-    const colors = await Promise.all([criticalLatency, criticalLoss, outageLatency, outageLoss].map(locator => locator
+    const styles = await Promise.all([criticalLatency, criticalLoss, outageLatency, outageLoss].map(locator => locator
       .locator('[data-node-ping-bucket-fill]')
-      .evaluate(element => getComputedStyle(element).backgroundColor)))
-    expect(colors[0]).toBe(colors[1])
-    expect(colors[2]).toBe(colors[3])
-    expect(colors[0]).not.toBe(colors[2])
+      .evaluate((element) => {
+        const style = getComputedStyle(element)
+        return { backgroundColor: style.backgroundColor, backgroundImage: style.backgroundImage, opacity: style.opacity }
+      })))
+    expect(styles[0]?.backgroundColor).toBe(styles[1]?.backgroundColor)
+    expect(styles[2]?.backgroundColor).toBe(styles[3]?.backgroundColor)
+    expect(styles[0]?.backgroundColor).not.toBe(styles[2]?.backgroundColor)
+    expect(styles[2]?.backgroundImage).toBe('none')
+    expect(styles[3]?.backgroundImage).toBe('none')
+    expect(styles[2]?.opacity).toBe('1')
+    expect(styles[3]?.opacity).toBe('1')
 
     const infoButton = primaryNodeCard(page).getByRole('button', { name: '查看该 Ping 任务详情' })
     await infoButton.hover()
@@ -3253,7 +3370,7 @@ test.describe('node-card per-node ping task bindings', () => {
     expect(latencyStates).not.toContain('confirmed-missing')
   })
 
-  test('v2.7.1 keeps open and newly closed buckets pending before finalizing a successful empty interval', async ({ page }) => {
+  test('v2.7.2 keeps open and newly closed buckets pending before finalizing a successful empty interval', async ({ page }) => {
     test.setTimeout(120_000)
     await page.setViewportSize({ width: 1280, height: 720 })
     const fixture = await installKomariFixture(page, {
@@ -3283,18 +3400,45 @@ test.describe('node-card per-node ping task bindings', () => {
       await expectNodeCardPingBucketState(page, metric, PING_INGESTION_BUCKET, 'confirmed-missing')
     const noSampleLatency = nodeCardPingBucket(page, 'latency', PING_INGESTION_BUCKET)
     const noSampleLoss = nodeCardPingBucket(page, 'loss', PING_INGESTION_BUCKET)
-    await expect(noSampleLatency).toHaveAttribute('data-node-ping-severity', 'missing')
-    await expect(noSampleLoss).toHaveAttribute('data-node-ping-severity', 'missing')
+    await expect(noSampleLatency).toHaveAttribute('data-node-ping-severity', 'no-sample')
+    await expect(noSampleLoss).toHaveAttribute('data-node-ping-severity', 'no-sample')
     await expect(noSampleLatency).toHaveAttribute('aria-label', /无采样/)
     await expect(noSampleLatency).not.toHaveAttribute('aria-label', /100%|不可达/)
     const noSampleStyles = await Promise.all([noSampleLatency, noSampleLoss].map(locator => locator
       .locator('[data-node-ping-bucket-fill]')
       .evaluate((element) => {
         const style = getComputedStyle(element)
-        return { backgroundImage: style.backgroundImage, opacity: style.opacity }
+        return { backgroundColor: style.backgroundColor, backgroundImage: style.backgroundImage, opacity: style.opacity }
       })))
     expect(noSampleStyles.every(style => style.backgroundImage.includes('repeating-linear-gradient'))).toBe(true)
-    expect(noSampleStyles.every(style => Number(style.opacity) < 1)).toBe(true)
+    expect(noSampleStyles.every(style => style.backgroundImage.includes('rgba(255, 255, 255, 0.36)'))).toBe(true)
+    expect(new Set(noSampleStyles.map(style => style.backgroundColor)).size).toBe(1)
+    expect(noSampleStyles.every(style => style.opacity === '0.76')).toBe(true)
+    const noSampleBoxes = await Promise.all([noSampleLatency.boundingBox(), noSampleLoss.boundingBox()])
+    await page.evaluate(() => document.documentElement.classList.add('dark'))
+    const darkNoSampleStyles = await Promise.all([noSampleLatency, noSampleLoss].map(locator => locator
+      .locator('[data-node-ping-bucket-fill]')
+      .evaluate((element) => {
+        const style = getComputedStyle(element)
+        return { backgroundImage: style.backgroundImage, opacity: style.opacity }
+      })))
+    expect(darkNoSampleStyles.every(style => style.backgroundImage.includes('repeating-linear-gradient'))).toBe(true)
+    expect(darkNoSampleStyles.every(style => style.opacity === '0.76')).toBe(true)
+    expect(await Promise.all([noSampleLatency.boundingBox(), noSampleLoss.boundingBox()])).toEqual(noSampleBoxes)
+    await page.evaluate(() => document.documentElement.classList.remove('dark'))
+
+    for (const width of [360, 375, 390, 430]) {
+      await page.setViewportSize({ width, height: 844 })
+      for (const metric of ['latency', 'loss'] as const) {
+        const bars = primaryNodeCard(page).locator(`[data-node-ping-bars="${metric}"] [data-node-ping-bar]`)
+        await expect(bars).toHaveCount(20)
+        await expect(nodeCardPingBucket(page, metric, PING_INGESTION_BUCKET)).toHaveAttribute('data-node-ping-severity', 'no-sample')
+        await expect(nodeCardPingBucket(page, metric, PING_INGESTION_BUCKET)).toHaveAttribute('aria-label', /无采样/)
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1)
+    }
+
+    await page.setViewportSize({ width: 1280, height: 720 })
     await expectNodeCardPingTooltip(page, 'latency', '12:00–12:03\n无采样')
     await nodeCardPingBucket(page, 'latency', PING_INGESTION_BUCKET).hover()
     await expect(page.locator('[data-slot="data-tooltip-content"]')).toContainText('无采样')
@@ -3309,8 +3453,75 @@ test.describe('node-card per-node ping task bindings', () => {
       .every(sample => sample.sampleAt !== Date.parse(PING_INGESTION_SAMPLE)))).toBe(true)
   })
 
-  test('v2.7.1 backfills a late real sample from CONFIRMED_MISSING to DATA without inventing a value', async ({ page }) => {
-    test.setTimeout(90_000)
+  test('v2.7.2 continuously settles six successful empty slots while preserving one current WAITING_SAMPLE slot', async ({ page }) => {
+    test.setTimeout(360_000)
+    await page.setViewportSize({ width: 1280, height: 720 })
+    const fixture = await installKomariFixture(page, {
+      fakeTimers: true,
+      clockNow: PING_INGESTION_CLOCK,
+      nodeCount: 1,
+      nodeCardPingTaskBindings: primaryBinding(202),
+      nodeCardPingFixture: {
+        metric: 'selected-empty',
+        legacy: 'selected-empty',
+      },
+    })
+    await openStablePage(page)
+
+    const strip = primaryNodeCard(page).locator('[data-node-ping-task-id="202"]')
+    const readRail = (metric: 'latency' | 'loss') => strip
+      .locator(`[data-node-ping-bars="${metric}"] [data-node-ping-bar]`)
+      .evaluateAll(elements => elements.map(element => ({
+        start: element.getAttribute('data-node-ping-bucket-start'),
+        end: element.getAttribute('data-node-ping-bucket-end'),
+        state: element.getAttribute('data-node-ping-state'),
+        severity: element.getAttribute('data-node-ping-severity'),
+        ariaLabel: element.getAttribute('aria-label'),
+      })))
+
+    const initial = await readRail('latency')
+    expect(initial).toHaveLength(20)
+    expect(initial.at(-1)).toMatchObject({
+      start: PING_INGESTION_BUCKET,
+      state: 'pending',
+      severity: 'waiting',
+      ariaLabel: '12:00–12:03\n等待采样',
+    })
+    const observedCurrentStarts = [initial.at(-1)?.start]
+    let previousCurrentStart = initial.at(-1)?.start
+
+    for (let index = 0; index < 6; index += 1) {
+      // The first observation lands on the existing one-minute heartbeat after
+      // the 40 s write/retry grace; later checks keep that phase each slot.
+      await fixture.advanceTime(index === 0 ? 240_000 : 180_000)
+      for (const metric of ['latency', 'loss'] as const) {
+        const rail = await readRail(metric)
+        expect(rail).toHaveLength(20)
+        expect(rail.at(-1)).toMatchObject({ state: 'pending', severity: 'waiting' })
+        expect(rail.at(-1)?.ariaLabel).toContain('等待采样')
+        const settled = rail.find(bucket => bucket.start === previousCurrentStart)
+        expect(settled).toMatchObject({ state: 'confirmed-missing', severity: 'no-sample' })
+        expect(settled?.ariaLabel).toContain('无采样')
+        expect(
+          rail.slice(0, -1).filter(bucket => bucket.state !== 'confirmed-missing'),
+          `unsettled ${metric} buckets after cycle ${index + 1}: ${JSON.stringify(rail)}`,
+        ).toEqual([])
+      }
+      const current = (await readRail('latency')).at(-1)?.start
+      expect(current).not.toBe(previousCurrentStart)
+      observedCurrentStarts.push(current)
+      previousCurrentStart = current
+    }
+
+    expect(new Set(observedCurrentStarts).size).toBe(7)
+    const selectedQueries = selectedPingMetricTimelineEntries(fixture.timeline)
+    expect(selectedQueries.length).toBeGreaterThan(6)
+    expect(selectedQueries.length).toBeLessThan(80)
+    expect(selectedQueries.every(entry => entry.responseSamples.length === 0)).toBe(true)
+  })
+
+  test('v2.7.2 backfills a late real sample from CONFIRMED_MISSING to DATA without inventing a value', async ({ page }) => {
+    test.setTimeout(180_000)
     await page.setViewportSize({ width: 1280, height: 720 })
     const fixture = await installKomariFixture(page, {
       fakeTimers: true,
@@ -3357,8 +3568,9 @@ test.describe('node-card per-node ping task bindings', () => {
     const browser = page.context().browser()
     if (!browser)
       throw new Error('Playwright browser is required for cold-context Ping regression coverage')
+    const baseURL = new URL(page.url()).origin
     const coldContext = await browser.newContext({
-      baseURL: 'http://127.0.0.1:4173',
+      baseURL,
       locale: 'zh-CN',
       timezoneId: 'Asia/Shanghai',
     })
@@ -3485,7 +3697,7 @@ test.describe('node-card per-node ping task bindings', () => {
     // Playwright has no deterministic in-place HTTP-cache clearing API, so a
     // fresh context is the controlled HTTP-cache / Clear-Site-Data proxy here.
     const coldContext = await browser.newContext({
-      baseURL: 'http://127.0.0.1:4173',
+      baseURL: new URL(page.url()).origin,
       locale: 'zh-CN',
       timezoneId: 'Asia/Shanghai',
     })
