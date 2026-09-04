@@ -373,6 +373,54 @@ assets. Unless the user explicitly opts out for that version, the completed
 Release must contain exactly one custom asset: the verified final customer
 installer ZIP. GitHub-generated source archives are not custom assets.
 
+### GitHub Release metadata contract
+
+Before creating or maintaining Releases, query the repository's complete current
+Release metadata with pagination. Treat GitHub's current values as authoritative;
+do not restore titles, notes, status, targets, or assets from an old README,
+template, report, screenshot, cache, or local backup.
+
+For every future formal Release:
+
+- use the full SemVer tag `v<version>`;
+- set the Release title/name to exactly the tag (`release.name === release.tag_name`)
+  without a product-name or `Release` prefix;
+- write the body in Simplified Chinese, preserve real Markdown line breaks, never
+  emit a literal `\n`, and include a `完整变更记录` link comparing the real previous
+  tag with the current tag;
+- describe only verified work from that version and preserve exact hotfix,
+  installer-name, project-name, version, and technical-boundary facts;
+- preserve current `Latest`, pre-release, draft, target, tag, publication, asset,
+  and user-edited body state unless the task explicitly authorizes that exact
+  change.
+
+When maintaining existing Releases, back up the complete current metadata outside
+the repository before any write. Change only the authorized fields, then reread
+all Releases and compare protected fields and every asset ID, name, size, digest,
+and URL against the backup. Draft Releases remain private and must not be published,
+deleted, or added to the public README merely as part of metadata maintenance.
+
+### README release-maintenance contract
+
+Every formal release must also reconcile the root README against the complete live
+GitHub Release inventory. The release is not complete until all of the following
+are true:
+
+1. the current Plus version, source-release reference, installer filename, and
+   single expanded `最新版本 · v<version>` section identify the released version;
+2. the latest summary is a concise subset of the current GitHub Release body, not
+   newly invented release content;
+3. the previous latest entry is moved into the collapsed version history;
+4. every public non-draft Release is represented exactly once and no nonexistent
+   version is invented;
+5. history is sorted from newest to oldest by SemVer, with any historical non-`v`
+   tag retained exactly as it exists;
+6. `（预发布）` is shown only when the current GitHub metadata reports
+   `prerelease = true`, while drafts are omitted;
+7. the `<details>` structure is complete and renders correctly on GitHub;
+8. older history and manually revised current content are preserved rather than
+   overwritten from stale templates.
+
 ## 18. Mandatory privacy and staged-file review
 
 Before every formal commit, push, or Release, inspect actual candidate/staged files
