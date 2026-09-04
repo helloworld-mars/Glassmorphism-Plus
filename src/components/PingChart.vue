@@ -19,6 +19,7 @@ import { loadPingMetricCoverage } from '@/services/pingMetricCoverage.service'
 import { useAppStore } from '@/stores/app'
 import { ACCESSIBLE_LINE_TYPES, getChartSeriesPalette } from '@/utils/chartPalette'
 import { normalizeMetricSeriesList, orderPingTasksByBackend, PING_LATENCY_METRIC, PING_LOSS_METRIC, pingTaskId, pingTaskName } from '@/utils/metricSeries'
+import { resolvePingChartDisplayDomain } from '@/utils/pingChartDisplayDomain'
 import { smoothPingChartDisplayRows } from '@/utils/pingChartSmoothing'
 import { normalizePingMetricSamples } from '@/utils/pingMetricSamples'
 import { createNextAlignedPingTimeWindow, createPingTimeWindow, isPingTimestampInWindow, parsePingTimestampMs } from '@/utils/pingTime'
@@ -40,6 +41,11 @@ interface CustomRange {
 interface PingChartTaskInfo extends PingTaskInfo {
   /** A Metric latency series can be useful before the optional loss summary arrives. */
   lossAvailable?: boolean
+}
+
+interface PingChartRecord extends PingRecord {
+  /** Presentation-only marker: false for a backend fill-empty layout point. */
+  finalized: boolean
 }
 
 // 图表主题相关颜色
@@ -161,7 +167,7 @@ watch(availableViews, (views) => {
 }, { immediate: true })
 
 // ==================== 数据状态 ====================
-const remoteData = shallowRef<PingRecord[]>([])
+const remoteData = shallowRef<PingChartRecord[]>([])
 const tasks = shallowRef<PingChartTaskInfo[]>([])
 const activeTimeWindow = shallowRef<PingTimeWindow | null>(null)
 const loading = ref(false)
@@ -174,6 +180,7 @@ const isTouchTooltipMode = ref(false)
 const activeTaskTooltipId = ref<number | null>(null)
 const smoothPeaks = ref(false)
 const smoothInfoTooltipOpen = ref(false)
+const legendSelection = shallowRef<Record<string, boolean>>({})
 
 const chartMargin = { top: 30, right: 24, bottom: 52, left: 56 }
 let coarsePointerMediaQuery: MediaQueryList | null = null
@@ -257,7 +264,7 @@ function buildMetricRecords(
   seriesList: MetricSeries[],
   nodeUuid: string,
   window: PingTimeWindow,
-): { records: PingRecord[], hasObservedData: boolean } {
+): { records: PingChartRecord[], hasObservedData: boolean } {
   const samples = normalizePingMetricSamples(seriesList, {
     entityId: nodeUuid,
     start: window.start,
@@ -274,6 +281,7 @@ function buildMetricRecords(
       time: sample.time,
       // Preserve a real full-loss/null bucket as an explicit chart gap.
       value: sample.latency ?? -1,
+      finalized: sample.observed,
     }]
   })
 
@@ -292,7 +300,7 @@ function getPingChartTimeWindow(): PingTimeWindow | null {
   return createNextAlignedPingTimeWindow(Date.now(), selectedHours.value, HISTORY_BUCKET_COUNT)
 }
 
-function filterRecordsToWindow(records: PingRecord[], window: PingTimeWindow): PingRecord[] {
+function filterRecordsToWindow(records: PingChartRecord[], window: PingTimeWindow): PingChartRecord[] {
   return records.filter((record) => {
     const timestamp = parsePingTimestampMs(record.time)
     return timestamp !== null && isPingTimestampInWindow(timestamp, window)
@@ -302,7 +310,7 @@ function filterRecordsToWindow(records: PingRecord[], window: PingTimeWindow): P
 async function loadMetricPingPayload(
   nodeUuid: string,
   window: PingTimeWindow,
-): Promise<{ records: PingRecord[], tasks: PingChartTaskInfo[] } | null> {
+): Promise<{ records: PingChartRecord[], tasks: PingChartTaskInfo[] } | null> {
   const metricRangeParams = {
     start: new Date(window.start).toISOString(),
     end: new Date(window.end).toISOString(),
@@ -429,7 +437,11 @@ async function fetchRecords() {
     if (sequence !== fetchRecordsSequence || requestedUuid !== props.uuid)
       return
 
-    const records = filterRecordsToWindow(result.records, requestedWindow)
+    const chartRecords: PingChartRecord[] = result.records.map(record => ({
+      ...record,
+      finalized: 'finalized' in record ? record.finalized === true : true,
+    }))
+    const records = filterRecordsToWindow(chartRecords, requestedWindow)
     records.sort((a, b) => (parsePingTimestampMs(a.time) ?? 0) - (parsePingTimestampMs(b.time) ?? 0))
 
     remoteData.value = records
@@ -566,6 +578,42 @@ const selectedTasks = computed(() => {
   return tasks.value.filter(t => selectedTaskIds.value.includes(t.id))
 })
 
+const visibleTaskIds = computed(() => selectedTasks.value
+  .filter(task => legendSelection.value[task.name] !== false)
+  .map(task => task.id))
+
+const pingChartDisplayDomain = computed(() => {
+  const window = activeTimeWindow.value
+  if (!window)
+    return null
+
+  return resolvePingChartDisplayDomain({
+    requestedStart: window.start,
+    requestedEnd: window.end,
+    selectedTaskIds: visibleTaskIds.value,
+    samples: remoteData.value.map(record => ({
+      taskId: record.task_id,
+      time: record.time,
+      finalized: record.finalized,
+    })),
+    preserveRequestedEnd: isCustomRange.value,
+  })
+})
+
+function handleLegendSelectionChanged(event: unknown): void {
+  const selected = event && typeof event === 'object' && 'selected' in event
+    ? (event as { selected?: Record<string, boolean> }).selected
+    : undefined
+  legendSelection.value = selected ? { ...selected } : {}
+}
+
+watch(
+  () => [selectedTaskIds.value.join(','), tasks.value.map(task => task.id).join(',')] as const,
+  () => {
+    legendSelection.value = {}
+  },
+)
+
 // 切换任务选中状态
 function toggleTask(taskId: number) {
   if (selectedTaskIds.value.includes(taskId)) {
@@ -620,7 +668,7 @@ const pingChartOption = computed(() => {
   const taskList = selectedTasks.value
   const data = chartData.value
   const hours = selectedHours.value
-  const window = activeTimeWindow.value
+  const displayDomain = pingChartDisplayDomain.value
 
   // 构建 series，确保颜色与卡片一致
   const series = taskList.map((task, index) => {
@@ -705,12 +753,13 @@ const pingChartOption = computed(() => {
       icon: 'roundRect',
       textStyle: { fontSize: 11, color: chartThemeColors.value.textSecondary },
       data: taskList.map(t => t.name),
+      selected: Object.fromEntries(taskList.map(task => [task.name, legendSelection.value[task.name] !== false])),
     },
     grid: chartMargin,
     xAxis: {
       type: 'time',
-      min: window?.start,
-      max: window?.end,
+      min: displayDomain?.min,
+      max: displayDomain?.max,
       axisLabel: {
         fontSize: 11,
         color: chartThemeColors.value.textSecondary,
@@ -785,6 +834,10 @@ onBeforeUnmount(() => {
     data-ping-chart-axis-type="time"
     :data-ping-chart-window-start="activeTimeWindow?.start"
     :data-ping-chart-window-end="activeTimeWindow?.end"
+    :data-ping-chart-display-start="pingChartDisplayDomain?.min"
+    :data-ping-chart-display-end="pingChartDisplayDomain?.max"
+    :data-ping-chart-latest-finalized="pingChartDisplayDomain?.latestFinalizedTimestamp ?? undefined"
+    :data-ping-chart-visible-task-ids="visibleTaskIds.join(',')"
     :data-ping-chart-record-count="remoteData.length"
   >
     <!-- 时间选择器 -->
@@ -872,6 +925,7 @@ onBeforeUnmount(() => {
             v-for="task in latestValues" :key="task.id"
             class="p-2 rounded-md bg-background/50 hover:bg-background hover:shadow-[0_0_0_2px] hover:shadow-primary/10 flex gap-3 cursor-pointer select-none transition-all items-center"
             :class="[!selectedTaskIds.includes(task.id) && 'opacity-30']"
+            :data-ping-chart-task-id="task.id"
             :onmouseover="(e: MouseEvent) => ((e.currentTarget as HTMLElement).style.borderColor = task.color)"
             :onmouseout="(e: MouseEvent) => ((e.currentTarget as HTMLElement).style.borderColor = '')"
             @click="toggleTask(task.id)"
@@ -999,7 +1053,7 @@ onBeforeUnmount(() => {
 
         <!-- 图表 -->
         <div class="h-80 bg-background/50 p-4 rounded-md">
-          <VChart :option="pingChartOption" autoresize />
+          <VChart :option="pingChartOption" autoresize @legendselectchanged="handleLegendSelectionChanged" />
         </div>
       </template>
     </Spinner>

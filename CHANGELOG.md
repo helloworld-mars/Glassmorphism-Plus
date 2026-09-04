@@ -2,6 +2,23 @@
 
 本文件只记录 **Glassmorphism Plus** 自己的发行版本。原始 Glassmorphism 的版本历史请查看[上游仓库](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases)；Plus 的选择性同步记录见 [UPSTREAM.md](UPSTREAM.md)。
 
+## [2.7.0] - 2026-09-04
+
+### Fixed
+
+- 节点详情页与首页 Ping 弹窗共用同一显示时间域：相对范围的右边界收紧到当前已选中且可见任务中的最新最终真实样本，不再显示所有曲线结束后的共同空白尾部。
+- 保留请求窗口原始左边界、7／14／30 天多层历史、自定义固定范围和内部真实缺口；不复制末值、不插值、不添加合成终点，继续使用 `connectNulls: false`。
+
+### Changed
+
+- 浅色主题首页 NodeCard 外沿改为由既有玻璃边框与文字 token 混合出的轻量边界；三块信息面板与 Ping 任务条使用同一语义来源的内描边，在图片、模糊和遮罩背景下更易分辨。
+- 深色主题卡片边框、背景、阴影与 Ping 颜色保持不变，四种 NodeCard 尺寸及单任务／三网布局继续保持原有几何。
+
+### Compatibility and performance
+
+- Ping RPC、请求参数、Metric／Legacy 选择、归一化、缓存键、刷新调度、长范围 coverage、三分钟 bucket、Tooltip 与任务绑定均未修改；展示域重算不新增请求、timer 或生产依赖。
+- 继续兼容 Komari `1.4.3`。
+
 ## [2.6.0] - 2026-09-04
 
 ### Changed

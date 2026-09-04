@@ -42,6 +42,12 @@ export interface VisualFixtureOptions {
   generalCardPreset?: string
   generalCardKeys?: string[]
   loadMetricFixture?: LoadMetricFixture
+  backgroundEnabled?: boolean
+  backgroundType?: 'image' | 'video'
+  lightBackgroundUrl?: string
+  darkBackgroundUrl?: string
+  backgroundBlur?: number
+  backgroundOverlay?: number
 }
 
 export interface LoadMetricFixture {
@@ -1039,6 +1045,12 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     hideAdminEntryWhenLoggedOut: false,
     hidePriceWhenLoggedOut: false,
     disablePageAnimation: options.disablePageAnimation ?? true,
+    backgroundEnabled: options.backgroundEnabled ?? false,
+    backgroundType: options.backgroundType ?? 'image',
+    lightBackgroundUrl: options.lightBackgroundUrl ?? '',
+    darkBackgroundUrl: options.darkBackgroundUrl ?? '',
+    backgroundBlur: options.backgroundBlur ?? 0,
+    backgroundOverlay: options.backgroundOverlay ?? 0,
     homeQuickControlsEnabled: true,
     homeQuickControlPreset: '完整',
     homeToolsEnabled: true,

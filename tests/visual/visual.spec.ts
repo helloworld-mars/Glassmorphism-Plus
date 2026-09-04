@@ -10,6 +10,7 @@ import { RequestManager } from '../../src/services/request.service'
 import { comparePingTaskOrder, createPingTaskOrderMap, orderPingTasksByBackend } from '../../src/utils/metricSeries'
 import { inspectNodeCardPingConfig } from '../../src/utils/nodeCardPingConfig'
 import { latencyBucketSeverity, lossBucketSeverity } from '../../src/utils/nodeCardPingPresentation'
+import { resolvePingChartDisplayDomain } from '../../src/utils/pingChartDisplayDomain'
 import { smoothPingChartDisplayRows } from '../../src/utils/pingChartSmoothing'
 import { mergePingMetricCoverageResponses } from '../../src/utils/pingMetricCoverage'
 import { normalizePingMetricSamples } from '../../src/utils/pingMetricSamples'
@@ -39,14 +40,14 @@ test('Plus documentation keeps its own version identity and preserves upstream a
 
   expect(readme).toContain('# 🌌 Komari Glassmorphism Plus')
   expect(readme).toContain('当前 Plus 版本')
-  expect(readme).toContain('**v2.6.0**')
+  expect(readme).toContain('**v2.7.0**')
   expect(readme).toContain('sanrokamlan Glassmorphism v3.3.7')
-  expect(readme).toContain('Glassmorphism-Plus-release-2.6.0.zip')
+  expect(readme).toContain('Glassmorphism-Plus-release-2.7.0.zip')
   expect(readme).toContain('Source code (zip)')
   expect(readme).not.toMatch(/^#{2,}\s+(?:\S.*)?v3\.\d/m)
 
   const changelogVersions = Array.from(changelog.matchAll(/^## \[([^\]]+)\]/gm), match => match[1])
-  expect(changelogVersions).toEqual(['2.6.0', '2.5.0', '2.3.1', '2.3.0', '2.2.0', '2.1.0', '2.0.0', '1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
+  expect(changelogVersions).toEqual(['2.7.0', '2.6.0', '2.5.0', '2.3.1', '2.3.0', '2.2.0', '2.1.0', '2.0.0', '1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
   expect(upstream).toContain('Current upstream baseline')
   expect(upstream).toContain('v3.3.7')
   expect(credits).toContain('helloworld-mars')
@@ -394,6 +395,72 @@ test('Ping timestamps use one strict [start, end) twenty-bucket contract', () =>
   }
   expect(getPingTimeBucketIndex(end - 1, window)).toBe(19)
   expect(getPingTimeBucketIndex(end, window)).toBeNull()
+})
+
+test('v2.7.0 trims only a relative Ping display tail to the latest finalized visible sample', () => {
+  const requestedStart = Date.parse('2026-09-04T10:20:00.000Z')
+  const requestedEnd = Date.parse('2026-09-04T11:20:00.000Z')
+  const samples = [
+    { taskId: 101, time: '2026-09-04T11:15:00.000Z', finalized: true },
+    { taskId: 202, time: '2026-09-04T11:17:00.000Z', finalized: true },
+    { taskId: 303, time: '2026-09-04T11:16:00.000Z', finalized: true },
+    // A fill-empty marker is not a real finalized observation and must not
+    // manufacture the endpoint that the display-domain correction removes.
+    { taskId: 202, time: '2026-09-04T11:20:00.000Z', finalized: false },
+    { taskId: 404, time: '2026-09-04T11:19:00.000Z', finalized: true },
+  ]
+
+  expect(resolvePingChartDisplayDomain({
+    requestedStart,
+    requestedEnd,
+    selectedTaskIds: [101, 202, 303],
+    samples,
+    preserveRequestedEnd: false,
+  })).toEqual({
+    min: requestedStart,
+    max: Date.parse('2026-09-04T11:17:00.000Z'),
+    latestFinalizedTimestamp: Date.parse('2026-09-04T11:17:00.000Z'),
+  })
+
+  expect(resolvePingChartDisplayDomain({
+    requestedStart,
+    requestedEnd,
+    selectedTaskIds: [101, 303],
+    samples,
+    preserveRequestedEnd: false,
+  }).max).toBe(Date.parse('2026-09-04T11:16:00.000Z'))
+
+  expect(resolvePingChartDisplayDomain({
+    requestedStart,
+    requestedEnd,
+    selectedTaskIds: [202],
+    samples: [{ taskId: 202, time: '2026-09-04T11:18:00.000Z', finalized: true }],
+    preserveRequestedEnd: false,
+  }).max).toBe(Date.parse('2026-09-04T11:18:00.000Z'))
+
+  expect(resolvePingChartDisplayDomain({
+    requestedStart,
+    requestedEnd,
+    selectedTaskIds: [],
+    samples,
+    preserveRequestedEnd: false,
+  })).toEqual({
+    min: requestedStart,
+    max: requestedEnd,
+    latestFinalizedTimestamp: null,
+  })
+
+  expect(resolvePingChartDisplayDomain({
+    requestedStart,
+    requestedEnd,
+    selectedTaskIds: [202],
+    samples,
+    preserveRequestedEnd: true,
+  })).toEqual({
+    min: requestedStart,
+    max: requestedEnd,
+    latestFinalizedTimestamp: Date.parse('2026-09-04T11:17:00.000Z'),
+  })
 })
 
 test('v2.5.0 maps real samples into one fixed 09:09–10:09 three-minute window', () => {
@@ -771,6 +838,138 @@ test('Ping modal and detail restore the smoothing control without changing the r
   await expect(detailChart).toHaveAttribute('data-ping-chart-smoothing', 'enabled')
 })
 
+test('v2.7.0 uses the latest finalized selected Ping sample as the relative display endpoint in modal and detail', async ({ page }) => {
+  const chartMetricCalls: Array<Record<string, unknown>> = []
+  page.on('request', (request) => {
+    if (!isRpc2Request(request.url()))
+      return
+    const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
+    if (!payload?.method)
+      return
+    const keys = Array.isArray(payload.params?.metric_keys) ? payload.params.metric_keys.map(String) : []
+    const tags = payload.params?.tags as Record<string, unknown> | undefined
+    const isPingMetric = keys.includes('ping.latency_ms')
+    if (payload.method === 'public:queryMetrics' && isPingMetric && tags?.task_id === undefined && payload.params?.max_points === 6000)
+      chartMetricCalls.push(payload.params ?? {})
+  })
+
+  const requestedStart = Date.parse('2026-09-04T10:21:00.000Z')
+  const requestedEnd = Date.parse('2026-09-04T11:21:00.000Z')
+  const latest101 = Date.parse('2026-09-04T11:15:00.000Z')
+  const latest202 = Date.parse('2026-09-04T11:17:00.000Z')
+  const latest303 = Date.parse('2026-09-04T11:16:00.000Z')
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await installKomariFixture(page, {
+    clockNow: '2026-09-04T11:19:00.000Z',
+    fakeTimers: true,
+    nodeCardPingFixture: {
+      metric: 'valid',
+      thirdSharedTask: true,
+      metricSamples: [
+        { time: '2026-09-04T10:25:00.000Z', taskId: 101, latency: 8, loss: 0, latencyCount: 1, lossCount: 1 },
+        { time: '2026-09-04T11:15:00.000Z', taskId: 101, latency: 9, loss: 0, latencyCount: 1, lossCount: 1 },
+        { time: '2026-09-04T10:25:00.000Z', taskId: 202, latency: 17, loss: 0, latencyCount: 1, lossCount: 1 },
+        { time: '2026-09-04T11:17:00.000Z', taskId: 202, latency: 18, loss: 0, latencyCount: 1, lossCount: 1 },
+        { time: '2026-09-04T11:20:00.000Z', taskId: 202, latency: null, loss: null, latencyCount: 0, lossCount: 0 },
+        { time: '2026-09-04T10:25:00.000Z', taskId: 303, latency: 31, loss: 0, latencyCount: 1, lossCount: 1 },
+        { time: '2026-09-04T11:16:00.000Z', taskId: 303, latency: 32, loss: 0, latencyCount: 1, lossCount: 1 },
+      ],
+    },
+  })
+  await openStablePage(page)
+  const dialog = await openPrimaryPingDialog(page)
+  const chart = dialog.locator('[data-ping-chart]')
+
+  await expect(chart).toHaveAttribute('data-ping-chart-window-start', String(requestedStart))
+  await expect(chart).toHaveAttribute('data-ping-chart-window-end', String(requestedEnd))
+  await expect(chart).toHaveAttribute('data-ping-chart-display-start', String(requestedStart))
+  await expect(chart).toHaveAttribute('data-ping-chart-display-end', String(latest202))
+  await expect(chart).toHaveAttribute('data-ping-chart-latest-finalized', String(latest202))
+  await expect(chart).toHaveAttribute('data-ping-chart-visible-task-ids', '101,202,303')
+  await expect(chart).toHaveAttribute('data-ping-chart-record-count', '7')
+
+  const requestCountBeforeLocalUi = chartMetricCalls.length
+  const echarts = chart.locator('.echarts')
+  const chartBounds = await echarts.boundingBox()
+  expect(chartBounds).not.toBeNull()
+  if (!chartBounds)
+    throw new Error('Ping chart bounds are unavailable')
+  const toggleMiddleLegend = () => page.mouse.click(
+    chartBounds.x + chartBounds.width / 2,
+    chartBounds.y + chartBounds.height - 14,
+  )
+
+  await toggleMiddleLegend()
+  await expect(chart).toHaveAttribute('data-ping-chart-visible-task-ids', '101,303')
+  await expect(chart).toHaveAttribute('data-ping-chart-display-end', String(latest303))
+  await toggleMiddleLegend()
+  await expect(chart).toHaveAttribute('data-ping-chart-visible-task-ids', '101,202,303')
+  await expect(chart).toHaveAttribute('data-ping-chart-display-end', String(latest202))
+  await chart.locator('[data-ping-chart-task-id="202"]').click()
+  await expect(chart).toHaveAttribute('data-ping-chart-visible-task-ids', '101,303')
+  await expect(chart).toHaveAttribute('data-ping-chart-display-end', String(latest303))
+  await chart.locator('[data-ping-chart-task-id="303"]').click()
+  await expect(chart).toHaveAttribute('data-ping-chart-visible-task-ids', '101')
+  await expect(chart).toHaveAttribute('data-ping-chart-display-end', String(latest101))
+  await chart.getByRole('button', { name: '全不选', exact: true }).click()
+  await expect(chart).toHaveAttribute('data-ping-chart-visible-task-ids', '')
+  await expect(chart).toHaveAttribute('data-ping-chart-display-end', String(requestedEnd))
+  await expect(chart).not.toHaveAttribute('data-ping-chart-latest-finalized', /.+/)
+  await chart.getByRole('button', { name: '全选', exact: true }).click()
+  await expect(chart).toHaveAttribute('data-ping-chart-display-end', String(latest202))
+  await chart.getByRole('button', { name: '平滑峰值', exact: true }).click()
+  await chart.locator('[data-ping-chart-task-id="101"]').hover()
+  await page.setViewportSize({ width: 1180, height: 760 })
+  await page.evaluate(() => {
+    const themeButton = document.querySelector<HTMLElement>('button[aria-label*="主题"][aria-label*="点击切换"]')
+    if (!themeButton)
+      throw new Error('theme control is unavailable')
+    themeButton.click()
+    themeButton.click()
+  })
+  await expect(page.locator('html')).toHaveClass(/dark/)
+  await expect(chart).toHaveAttribute('data-ping-chart-display-end', String(latest202))
+  expect(chartMetricCalls).toHaveLength(requestCountBeforeLocalUi)
+
+  await dialog.getByRole('button', { name: '关闭' }).click()
+  await page.goto(`/instance/${PRIMARY_NODE_UUID}`)
+  await expect(page.getByText('硬件信息')).toBeVisible()
+  const detailChart = page.locator('[data-ping-chart]').first()
+  await expect(detailChart).toHaveAttribute('data-ping-chart-window-start', String(requestedStart))
+  await expect(detailChart).toHaveAttribute('data-ping-chart-window-end', String(requestedEnd))
+  await expect(detailChart).toHaveAttribute('data-ping-chart-display-start', String(requestedStart))
+  await expect(detailChart).toHaveAttribute('data-ping-chart-display-end', String(latest202))
+  await expect(detailChart).toHaveAttribute('data-ping-chart-latest-finalized', String(latest202))
+})
+
+test('v2.7.0 keeps the requested Ping domain finite when every history source is empty or unavailable', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await installKomariFixture(page, {
+    clockNow: '2026-09-04T11:19:00.000Z',
+    nodeCardPingFixture: { metric: 'error', legacy: 'error' },
+  })
+  await openStablePage(page)
+  const dialog = await openPrimaryPingDialog(page)
+  const chart = dialog.locator('[data-ping-chart]')
+  await expect(chart.locator('.text-red-500')).toBeVisible()
+
+  const domain = await chart.evaluate(element => ({
+    start: Number(element.getAttribute('data-ping-chart-window-start')),
+    end: Number(element.getAttribute('data-ping-chart-window-end')),
+    displayStart: Number(element.getAttribute('data-ping-chart-display-start')),
+    displayEnd: Number(element.getAttribute('data-ping-chart-display-end')),
+    latest: element.getAttribute('data-ping-chart-latest-finalized'),
+    text: element.textContent ?? '',
+  }))
+  expect(Number.isFinite(domain.displayStart)).toBe(true)
+  expect(Number.isFinite(domain.displayEnd)).toBe(true)
+  expect(domain.displayStart).toBe(domain.start)
+  expect(domain.displayEnd).toBe(domain.end)
+  expect(domain.displayEnd).toBeGreaterThan(domain.displayStart)
+  expect(domain.latest).toBeNull()
+  expect(domain.text).not.toContain('1970')
+})
+
 test('Ping-only 7-day and 14-day ranges use their own Metric windows and do not alter load ranges', async ({ page }) => {
   const pingMetricCalls: Array<Record<string, unknown>> = []
   page.on('request', (request) => {
@@ -795,6 +994,9 @@ test('Ping-only 7-day and 14-day ranges use their own Metric windows and do not 
     pingMetricCalls.length = 0
     await rangeTabs.getByText(label, { exact: true }).click()
     await expect.poll(() => pingMetricCalls.map(readPingRangeHours)).toEqual([hours])
+    const chart = dialog.locator('[data-ping-chart]')
+    await expect(chart).toHaveAttribute('data-ping-chart-display-start', await chart.getAttribute('data-ping-chart-window-start') ?? '')
+    await expect(chart).toHaveAttribute('data-ping-chart-display-end', await chart.getAttribute('data-ping-chart-latest-finalized') ?? '')
   }
 
   pingMetricCalls.length = 0
@@ -819,6 +1021,8 @@ test('Ping-only 7-day and 14-day ranges use their own Metric windows and do not 
     const end = Number(await chart.getAttribute('data-ping-chart-window-end'))
     return (end - start) / 3_600_000
   }).toBe(720)
+  await expect(chart).toHaveAttribute('data-ping-chart-display-start', await chart.getAttribute('data-ping-chart-window-start') ?? '')
+  await expect(chart).toHaveAttribute('data-ping-chart-display-end', await chart.getAttribute('data-ping-chart-latest-finalized') ?? '')
   expect(thirtyDay.max_points).toBe(6000)
   expect(thirtyDay.metric_keys).toEqual(['ping.latency_ms', 'ping.loss'])
 
@@ -886,6 +1090,8 @@ test('a long custom Ping range reuses the bounded coverage loader without changi
     const end = Number(await chart.getAttribute('data-ping-chart-window-end'))
     return (end - start) / 3_600_000
   }).toBe(720)
+  await expect(chart).toHaveAttribute('data-ping-chart-display-start', await chart.getAttribute('data-ping-chart-window-start') ?? '')
+  await expect(chart).toHaveAttribute('data-ping-chart-display-end', await chart.getAttribute('data-ping-chart-window-end') ?? '')
 })
 
 test('30-day Ping stitches sparse daily history with the retained hourly tier in both modal and detail', async ({ page }) => {
@@ -969,6 +1175,8 @@ test('30-day Ping stitches sparse daily history with the retained hourly tier in
     const end = Number(await chart.getAttribute('data-ping-chart-window-end'))
     return (end - start) / 3_600_000
   }).toBe(720)
+  await expect(chart).toHaveAttribute('data-ping-chart-display-start', await chart.getAttribute('data-ping-chart-window-start') ?? '')
+  await expect(chart).toHaveAttribute('data-ping-chart-display-end', String(Date.parse('2026-08-13T07:00:00.000Z')))
   expect(legacyCalls.filter(call => Number(call.hours) === 720)).toHaveLength(0)
 
   await dialog.getByRole('button', { name: '关闭' }).click()
@@ -982,6 +1190,8 @@ test('30-day Ping stitches sparse daily history with the retained hourly tier in
     const end = Number(await detailChart.getAttribute('data-ping-chart-window-end'))
     return (end - start) / 3_600_000
   }).toBe(720)
+  await expect(detailChart).toHaveAttribute('data-ping-chart-display-start', await detailChart.getAttribute('data-ping-chart-window-start') ?? '')
+  await expect(detailChart).toHaveAttribute('data-ping-chart-display-end', String(Date.parse('2026-08-13T07:00:00.000Z')))
   await expect.poll(() => queryCalls.map(readPingRangeHours).filter(hours => hours > 1)).toEqual([720, 600, 720, 600])
   expect(legacyCalls.filter(call => Number(call.hours) === 720)).toHaveLength(0)
 })
@@ -1087,13 +1297,13 @@ test('brand metadata and homepage footer retain current and original attribution
     name: 'Komari Glassmorphism Plus',
     short: 'glassmorphism-plus',
     description: 'A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.',
-    version: '2.6.0',
+    version: '2.7.0',
     author: 'helloworld-mars',
     url: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(packageMetadata).toMatchObject({
     name: 'komari-theme-glassmorphism-plus',
-    version: '2.6.0',
+    version: '2.7.0',
     homepage: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(themeManifest.short).toMatch(/^[\w-]+$/)
@@ -1137,7 +1347,7 @@ test('brand metadata and homepage footer retain current and original attribution
 
   const footer = page.locator('footer')
   await expect(footer.getByRole('link', { name: 'Glassmorphism Plus' })).toHaveAttribute('href', 'https://github.com/helloworld-mars/Glassmorphism-Plus')
-  await expect(footer.getByText('v2.6.0 · helloworld-mars', { exact: true }).first()).toBeVisible()
+  await expect(footer.getByText('v2.7.0 · helloworld-mars', { exact: true }).first()).toBeVisible()
   await expect(footer.getByRole('link', { name: 'Based on the original theme by sanrokamlan' }))
     .toHaveAttribute('href', 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism')
   await expect(footer).not.toContainText('unknown')
@@ -1209,6 +1419,65 @@ test('home dark mobile', async ({ page }) => {
   await expectNodeMetricIcons(page)
   await expect(page).toHaveScreenshot('home-dark-mobile.png', { fullPage: false })
 })
+
+for (const background of [
+  { name: 'default with earth', options: { hideEarth: false } },
+  {
+    name: 'custom image with blur and overlay',
+    options: {
+      hideEarth: true,
+      backgroundEnabled: true,
+      backgroundType: 'image' as const,
+      lightBackgroundUrl: '/images/default-background-v2.webp',
+      backgroundBlur: 6,
+      backgroundOverlay: 24,
+    },
+  },
+  {
+    name: 'video loading or fallback with blur and overlay',
+    options: {
+      hideEarth: true,
+      backgroundEnabled: true,
+      backgroundType: 'video' as const,
+      lightBackgroundUrl: '/images/default-background-v2.webp',
+      backgroundBlur: 4,
+      backgroundOverlay: 18,
+    },
+  },
+] as const) {
+  test(`v2.7.0 keeps light NodeCard surface edges visible over ${background.name}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await installKomariFixture(page, {
+      ...background.options,
+      nodeCardPingDisplayConfigV3: v3GlobalPingConfig(true),
+      nodeCardPingFixture: { metric: 'valid', thirdSharedTask: true },
+    })
+    await openStablePage(page)
+
+    const card = primaryNodeCard(page)
+    await card.scrollIntoViewIfNeeded()
+    const styles = await card.evaluate(element => ({
+      cardBorderWidth: getComputedStyle(element).borderWidth,
+      cardBorderColor: getComputedStyle(element).borderColor,
+      infoShadows: Array.from(element.querySelectorAll('.node-card-info-surface'), item => getComputedStyle(item).boxShadow),
+      stripShadows: Array.from(element.querySelectorAll('.node-card-ping-task-strip'), item => getComputedStyle(item).boxShadow),
+      contained: element.scrollWidth <= element.clientWidth + 1,
+    }))
+    expect(styles.cardBorderWidth).toBe('1px')
+    expect(styles.cardBorderColor).not.toBe('rgba(0, 0, 0, 0)')
+    expect(styles.infoShadows).toHaveLength(3)
+    expect(styles.infoShadows.every(shadow => shadow.includes('inset'))).toBe(true)
+    expect(styles.stripShadows).toHaveLength(3)
+    expect(styles.stripShadows.every(shadow => shadow.includes('inset'))).toBe(true)
+    expect(styles.contained).toBe(true)
+
+    await expect(page.locator('.background-container')).toBeVisible()
+    if (background.options.hideEarth)
+      await expect(page.locator('.earth-globe-host')).toHaveCount(0)
+    else
+      await expect(page.locator('.earth-globe-host')).toHaveCount(1)
+  })
+}
 
 test('home accessible list desktop', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
@@ -2579,6 +2848,36 @@ test.describe('node-card per-node ping task bindings', () => {
       await expect(card.locator('[data-node-ping-bars="latency"] [data-node-ping-bar]')).toHaveCount((threeNetworkEnabled ? 3 : 1) * 20)
       await expect(card.locator('[data-node-ping-bars="loss"] [data-node-ping-bar]')).toHaveCount((threeNetworkEnabled ? 3 : 1) * 20)
 
+      const surfaceStyles = await card.evaluate((element) => {
+        const styleFor = (target: Element) => {
+          const style = getComputedStyle(target)
+          return {
+            borderWidth: style.borderWidth,
+            borderColor: style.borderColor,
+            boxShadow: style.boxShadow,
+          }
+        }
+        return {
+          card: styleFor(element),
+          info: Array.from(element.querySelectorAll('.node-card-info-surface'), styleFor),
+          strips: Array.from(element.querySelectorAll('.node-card-ping-task-strip'), styleFor),
+          contained: element.scrollWidth <= element.clientWidth + 1,
+        }
+      })
+      expect(surfaceStyles.card.borderWidth).toBe('1px')
+      expect(surfaceStyles.card.borderColor).not.toBe('rgba(0, 0, 0, 0)')
+      expect(surfaceStyles.info).toHaveLength(3)
+      expect(surfaceStyles.strips).toHaveLength(threeNetworkEnabled ? 3 : 1)
+      expect(surfaceStyles.contained).toBe(true)
+      if (scenario.dark) {
+        expect(surfaceStyles.info.every(style => style.boxShadow === 'none')).toBe(true)
+        expect(surfaceStyles.strips.every(style => style.boxShadow === 'none')).toBe(true)
+      }
+      else {
+        expect(surfaceStyles.info.every(style => style.boxShadow.includes('inset'))).toBe(true)
+        expect(surfaceStyles.strips.every(style => style.boxShadow.includes('inset'))).toBe(true)
+      }
+
       const layouts = await strips.evaluateAll(elements => elements.map((element) => {
         const query = (selector: string) => element.querySelector<HTMLElement>(selector)!.getBoundingClientRect()
         const header = element.querySelector<HTMLElement>('.node-card-ping-task-header')!
@@ -2785,6 +3084,7 @@ test.describe('node-card per-node ping task bindings', () => {
   })
 
   test('v1.3.3 backfills a late real sample from CONFIRMED_MISSING to DATA without inventing a value', async ({ page }) => {
+    test.setTimeout(45_000)
     await page.setViewportSize({ width: 1280, height: 720 })
     const fixture = await installKomariFixture(page, {
       fakeTimers: true,

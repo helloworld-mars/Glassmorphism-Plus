@@ -390,6 +390,31 @@ html.legacy-webkit [data-slot='card'] {
   background-color: var(--glass-dark-card-hover, rgb(10 14 22 / 0.9)) !important;
 }
 
+/* The lower home cards sit over more varied imagery than the summary row.
+   Derive a slightly clearer light-only edge from the configured glass tokens;
+   inset rings keep every existing card and Ping-strip dimension unchanged. */
+html:not(.dark) .node-card {
+  --node-card-light-edge: color-mix(
+    in srgb,
+    var(--glass-light-border, var(--color-border)) 76%,
+    var(--glass-light-text, var(--color-foreground)) 24%
+  );
+  --node-card-light-surface-edge: color-mix(
+    in srgb,
+    var(--glass-light-border, var(--color-border)) 84%,
+    var(--glass-light-text, var(--color-foreground)) 16%
+  );
+
+  border-color: var(--glass-light-border, var(--color-border)) !important;
+  border-color: var(--node-card-light-edge) !important;
+}
+
+html:not(.dark) .node-card .node-card-info-surface,
+html:not(.dark) .node-card .node-card-ping-task-strip {
+  box-shadow: inset 0 0 0 1px var(--glass-light-border, var(--color-border));
+  box-shadow: inset 0 0 0 1px var(--node-card-light-surface-edge);
+}
+
 .node-card,
 .bg-card,
 [data-slot='card'],

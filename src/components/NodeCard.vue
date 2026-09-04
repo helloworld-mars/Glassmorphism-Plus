@@ -465,7 +465,7 @@ function hasRegion(region: string | null | undefined): boolean {
         <!-- 三列：网速 / 总流量 / 剩余天数+价格或负载 -->
         <div class="grid gap-1.5" :class="nodeCardMetricGridClass">
           <!-- 实时网速 -->
-          <div class="flex flex-col gap-0.5 rounded-lg bg-slate-500/5 min-w-0 overflow-hidden" :class="nodeCardMetricBoxClass">
+          <div class="node-card-info-surface flex flex-col gap-0.5 rounded-lg bg-slate-500/5 min-w-0 overflow-hidden" :class="nodeCardMetricBoxClass">
             <div class="text-[11px] text-success flex items-center gap-1">
               <Icon icon="tabler:chevron-up" width="11" height="11" />
               <span class="truncate min-w-0 overflow-hidden">{{ formatBytesPerSecond(props.node.net_out ?? 0) }}</span>
@@ -477,7 +477,7 @@ function hasRegion(region: string | null | undefined): boolean {
           </div>
 
           <!-- 总流量 -->
-          <div class="flex flex-col gap-0.5 rounded-lg bg-slate-500/5 min-w-0 overflow-hidden" :class="nodeCardMetricBoxClass">
+          <div class="node-card-info-surface flex flex-col gap-0.5 rounded-lg bg-slate-500/5 min-w-0 overflow-hidden" :class="nodeCardMetricBoxClass">
             <div class="text-[11px] text-muted-foreground flex items-center gap-1">
               <Icon icon="tabler:upload" width="11" height="11" />
               <span class="truncate min-w-0 overflow-hidden">{{ formatBytes(props.node.net_total_up ?? 0) }}</span>
@@ -489,7 +489,7 @@ function hasRegion(region: string | null | undefined): boolean {
           </div>
 
           <!-- 第三列：有价格显示剩余天数+价格，否则显示负载 -->
-          <div class="flex flex-col gap-0.5 rounded-lg bg-slate-500/5 min-w-0 overflow-hidden" :class="nodeCardMetricBoxClass">
+          <div class="node-card-info-surface flex flex-col gap-0.5 rounded-lg bg-slate-500/5 min-w-0 overflow-hidden" :class="nodeCardMetricBoxClass">
             <template v-if="remainingInfoTags.length">
               <div
                 v-for="(item, i) in remainingInfoTags" :key="i"
@@ -522,7 +522,7 @@ function hasRegion(region: string | null | undefined): boolean {
             v-for="panel in nodeCardPingPanels"
             :key="panel.metric"
             type="button"
-            class="group/panel relative flex flex-col rounded-lg bg-slate-500/5"
+            class="node-card-info-surface group/panel relative flex flex-col rounded-lg bg-slate-500/5"
             :class="[nodeCardPingPanelClass, nodeCardPanelClass, !props.node.online ? 'blur-xs opacity-50' : '']"
             :data-node-ping-panel="panel.metric"
             :title="panel.tooltip"
