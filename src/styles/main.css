@@ -794,6 +794,17 @@ header {
   background-color: var(--ping-critical);
 }
 
+.node-card-ping-bucket-hitbox[data-node-ping-severity='missing'] > .node-card-ping-bucket-fill {
+  background-color: color-mix(in srgb, var(--ping-outage) 20%, transparent);
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 2px,
+    color-mix(in srgb, var(--ping-outage) 62%, transparent) 2px 3px
+  );
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ping-outage) 58%, transparent) inset;
+  opacity: 0.72;
+}
+
 .node-card-ping-bucket-hitbox[data-node-ping-severity='unreachable'] > .node-card-ping-bucket-fill {
   background-color: var(--ping-outage);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--ping-outage) 70%, transparent) inset;

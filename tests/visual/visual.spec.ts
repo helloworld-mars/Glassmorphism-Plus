@@ -12,6 +12,7 @@ import { inspectNodeCardPingConfig } from '../../src/utils/nodeCardPingConfig'
 import { latencyBucketSeverity, lossBucketSeverity } from '../../src/utils/nodeCardPingPresentation'
 import { resolvePingChartDisplayDomain } from '../../src/utils/pingChartDisplayDomain'
 import { smoothPingChartDisplayRows } from '../../src/utils/pingChartSmoothing'
+import { resolvePingHistoryBucketState } from '../../src/utils/pingHistoryState'
 import { mergePingMetricCoverageResponses } from '../../src/utils/pingMetricCoverage'
 import { normalizePingMetricSamples } from '../../src/utils/pingMetricSamples'
 import { createPingTimeWindow, getPingTimeBucketIndex, parsePingTimestampMs } from '../../src/utils/pingTime'
@@ -40,14 +41,14 @@ test('Plus documentation keeps its own version identity and preserves upstream a
 
   expect(readme).toContain('# 🌌 Komari Glassmorphism Plus')
   expect(readme).toContain('当前 Plus 版本')
-  expect(readme).toContain('**v2.7.0**')
+  expect(readme).toContain('**v2.7.1**')
   expect(readme).toContain('sanrokamlan Glassmorphism v3.3.7')
-  expect(readme).toContain('Glassmorphism-Plus-release-2.7.0.zip')
+  expect(readme).toContain('Glassmorphism-Plus-release-2.7.1.zip')
   expect(readme).toContain('Source code (zip)')
   expect(readme).not.toMatch(/^#{2,}\s+(?:\S.*)?v3\.\d/m)
 
   const changelogVersions = Array.from(changelog.matchAll(/^## \[([^\]]+)\]/gm), match => match[1])
-  expect(changelogVersions).toEqual(['2.7.0', '2.6.0', '2.5.0', '2.3.1', '2.3.0', '2.2.0', '2.1.0', '2.0.0', '1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
+  expect(changelogVersions).toEqual(['2.7.1', '2.7.0', '2.6.0', '2.5.0', '2.3.1', '2.3.0', '2.2.0', '2.1.0', '2.0.0', '1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
   expect(upstream).toContain('Current upstream baseline')
   expect(upstream).toContain('v3.3.7')
   expect(credits).toContain('helloworld-mars')
@@ -191,6 +192,16 @@ function isRpc2Request(requestUrl: string): boolean {
   return new URL(requestUrl).pathname.replace(/\/+$/, '').endsWith('/rpc2')
 }
 
+type VisitorThemeMode = 'light' | 'beijing' | 'dark'
+
+async function expectVisitorThemeState(page: Page, selected: VisitorThemeMode, effective: 'light' | 'dark'): Promise<void> {
+  const root = page.locator('html')
+  for (const mode of ['light', 'beijing', 'dark'] as const)
+    await expect(page.getByTestId(`theme-mode-${mode}`)).toHaveAttribute('aria-pressed', String(mode === selected))
+  await expect(root).toHaveClass(effective === 'dark' ? /dark/ : /^(?!.*\bdark\b)/)
+  await expect.poll(() => root.evaluate(element => element.style.colorScheme)).toBe(effective)
+}
+
 test('RPC request observers accept clean and prefixed rpc2 paths without overmatching', () => {
   expect(isRpc2Request('http://127.0.0.1:4173/rpc2')).toBe(true)
   expect(isRpc2Request('http://127.0.0.1:4173/api/rpc2')).toBe(true)
@@ -215,10 +226,30 @@ test('v2.3.1 presentation keeps severe degradation distinct from a paired confir
   expect(latencyBucketSeverity(point(null, 100))).toBe('unreachable')
   expect(lossBucketSeverity(point(null, 100))).toBe('unreachable')
   expect(latencyBucketSeverity({ ...point(null, 100), latencyState: 'pending' })).toBe('neutral')
-  expect(latencyBucketSeverity({ ...point(null, null), latencyState: 'confirmed-missing', lossState: 'confirmed-missing' })).toBe('neutral')
+  expect(latencyBucketSeverity({ ...point(null, null), latencyState: 'confirmed-missing', lossState: 'confirmed-missing' })).toBe('missing')
+  expect(lossBucketSeverity({ ...point(null, null), latencyState: 'confirmed-missing', lossState: 'confirmed-missing' })).toBe('missing')
   expect(latencyBucketSeverity({ ...point(null, null), latencyState: 'pending', lossState: 'pending' }, true)).toBe('error')
   expect(latencyBucketSeverity(point(999, 100))).toBe('critical')
   expect(lossBucketSeverity(point(999, 100))).toBe('critical')
+})
+
+test('v2.7.1 finalizes only successfully queried closed Ping buckets after the existing retry budget', () => {
+  const timing = {
+    bucketStart: 0,
+    bucketEnd: 180_000,
+    now: 60_000,
+    latestAcceptedSampleAt: null,
+    firstObservedAt: 0,
+    taskIntervalMs: 60_000,
+    canConfirmMissing: true,
+  }
+
+  expect(resolvePingHistoryBucketState(false, timing)).toBe('pending')
+  expect(resolvePingHistoryBucketState(false, { ...timing, now: 180_000 })).toBe('pending')
+  expect(resolvePingHistoryBucketState(false, { ...timing, now: 219_999 })).toBe('pending')
+  expect(resolvePingHistoryBucketState(false, { ...timing, now: 220_000 })).toBe('confirmed-missing')
+  expect(resolvePingHistoryBucketState(false, { ...timing, now: 500_000, canConfirmMissing: false })).toBe('pending')
+  expect(resolvePingHistoryBucketState(true, { ...timing, now: 500_000 })).toBe('data')
 })
 
 async function expectNodeCardPingTooltip(page: Page, metric: 'latency' | 'loss', text: string): Promise<void> {
@@ -921,10 +952,9 @@ test('v2.7.0 uses the latest finalized selected Ping sample as the relative disp
   await chart.locator('[data-ping-chart-task-id="101"]').hover()
   await page.setViewportSize({ width: 1180, height: 760 })
   await page.evaluate(() => {
-    const themeButton = document.querySelector<HTMLElement>('button[aria-label*="主题"][aria-label*="点击切换"]')
+    const themeButton = document.querySelector<HTMLElement>('[data-testid="theme-mode-dark"]')
     if (!themeButton)
       throw new Error('theme control is unavailable')
-    themeButton.click()
     themeButton.click()
   })
   await expect(page.locator('html')).toHaveClass(/dark/)
@@ -1297,13 +1327,13 @@ test('brand metadata and homepage footer retain current and original attribution
     name: 'Komari Glassmorphism Plus',
     short: 'glassmorphism-plus',
     description: 'A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.',
-    version: '2.7.0',
+    version: '2.7.1',
     author: 'helloworld-mars',
     url: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(packageMetadata).toMatchObject({
     name: 'komari-theme-glassmorphism-plus',
-    version: '2.7.0',
+    version: '2.7.1',
     homepage: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
   })
   expect(themeManifest.short).toMatch(/^[\w-]+$/)
@@ -1347,7 +1377,7 @@ test('brand metadata and homepage footer retain current and original attribution
 
   const footer = page.locator('footer')
   await expect(footer.getByRole('link', { name: 'Glassmorphism Plus' })).toHaveAttribute('href', 'https://github.com/helloworld-mars/Glassmorphism-Plus')
-  await expect(footer.getByText('v2.7.0 · helloworld-mars', { exact: true }).first()).toBeVisible()
+  await expect(footer.getByText('v2.7.1 · helloworld-mars', { exact: true }).first()).toBeVisible()
   await expect(footer.getByRole('link', { name: 'Based on the original theme by sanrokamlan' }))
     .toHaveAttribute('href', 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism')
   await expect(footer).not.toContainText('unknown')
@@ -1394,14 +1424,189 @@ for (const scenario of [
     await expect(entry).toHaveCount(scenario.visible ? 1 : 0)
     if (scenario.visible) {
       await expect(entry).toHaveAttribute('title', '延迟监测中心')
+      await expect(entry).toHaveAttribute('aria-label', '延迟监测中心')
       await entry.hover()
-      const tooltip = page.locator('[data-slot="tooltip-content"]')
-      await expect(tooltip).toContainText('延迟监测中心')
-      await expect(tooltip).not.toContainText('09')
+      await page.waitForTimeout(300)
+      await expect(page.locator('[data-slot="tooltip-content"]')).toHaveCount(0)
     }
-    await expect(page.getByRole('button', { name: /主题/ })).toBeVisible()
+    await expect(page.getByRole('group', { name: '主题模式' })).toBeVisible()
   })
 }
+
+test('v2.7.1 header exposes the three direct theme choices before the unchanged visitor tools', async ({ page }) => {
+  await installKomariFixture(page, { adminAccess: 'admin' })
+  await openStablePage(page)
+
+  const expectedLabels = ['浅色模式', '北京时间自动', '深色模式', '显示首页工具', '延迟监测中心', '后台管理']
+  const controls = page.getByTestId('header-actions').locator('button')
+  await expect(controls).toHaveCount(expectedLabels.length)
+  expect(await controls.evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')))).toEqual(expectedLabels)
+
+  for (const accessibleName of expectedLabels) {
+    const button = page.getByRole('button', { name: accessibleName, exact: true })
+    await expect(button).toBeVisible()
+    await expect(button).toHaveAttribute('title', accessibleName)
+    await expect(button).toHaveAttribute('aria-label', accessibleName)
+    await button.focus()
+    await expect(button).toBeFocused()
+    await button.hover()
+    await page.waitForTimeout(300)
+    await expect(page.locator('[data-slot="tooltip-content"]')).toHaveCount(0)
+  }
+})
+
+for (const scenario of [
+  { mode: 'light' as const, managed: 'dark' as const, clockNow: '2026-09-04T12:30:00.000Z', effective: 'light' as const },
+  { mode: 'beijing' as const, managed: 'light' as const, clockNow: '2026-09-04T12:30:00.000Z', effective: 'dark' as const },
+  { mode: 'dark' as const, managed: 'light' as const, clockNow: '2026-09-04T00:30:00.000Z', effective: 'dark' as const },
+]) {
+  test(`v2.7.1 ${scenario.mode} is a direct local preference and persists across reload`, async ({ page }) => {
+    const adminThemeWrites: string[] = []
+    page.on('request', (request) => {
+      const url = new URL(request.url())
+      if (url.pathname === '/api/admin/theme/settings' && request.method() !== 'GET')
+        adminThemeWrites.push(`${request.method()} ${url.pathname}`)
+    })
+    const fixture = await installKomariFixture(page, {
+      managedThemeMode: scenario.managed,
+      clockNow: scenario.clockNow,
+      fakeTimers: true,
+      preserveStorageOnReload: true,
+    })
+    await openStablePage(page)
+
+    await page.getByTestId(`theme-mode-${scenario.mode}`).click()
+    await expectVisitorThemeState(page, scenario.mode, scenario.effective)
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('themeMode'))).toBe(scenario.mode)
+    expect(adminThemeWrites).toEqual([])
+    expect(fixture.getThemeSaveCount()).toBe(0)
+
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
+    await expectVisitorThemeState(page, scenario.mode, scenario.effective)
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('themeMode'))).toBe(scenario.mode)
+    expect(adminThemeWrites).toEqual([])
+    expect(fixture.getThemeSaveCount()).toBe(0)
+  })
+}
+
+for (const scenario of [
+  { managed: 'light' as const, clockNow: '2026-09-04T12:30:00.000Z', effective: 'light' as const },
+  { managed: 'beijing' as const, clockNow: '2026-09-04T12:30:00.000Z', effective: 'dark' as const },
+  { managed: 'dark' as const, clockNow: '2026-09-04T00:30:00.000Z', effective: 'dark' as const },
+]) {
+  test(`v2.7.1 visitors without a local preference follow the managed ${scenario.managed} default`, async ({ page }) => {
+    const fixture = await installKomariFixture(page, {
+      managedThemeMode: scenario.managed,
+      clockNow: scenario.clockNow,
+      fakeTimers: true,
+    })
+    await openStablePage(page)
+
+    await expectVisitorThemeState(page, scenario.managed, scenario.effective)
+    expect(fixture.getThemeSaveCount()).toBe(0)
+  })
+}
+
+for (const boundary of [
+  {
+    name: '19:00 changes Beijing automatic from light to dark',
+    clockNow: '2026-09-04T18:59:30+08:00',
+    before: 'light' as const,
+    after: 'dark' as const,
+  },
+  {
+    name: '07:00 changes Beijing automatic from dark to light across the night window',
+    clockNow: '2026-09-05T06:59:30+08:00',
+    before: 'dark' as const,
+    after: 'light' as const,
+  },
+]) {
+  test(`v2.7.1 ${boundary.name} while keeping only the automatic preference active`, async ({ page }) => {
+    const fixture = await installKomariFixture(page, {
+      managedThemeMode: 'light',
+      clockNow: boundary.clockNow,
+      fakeTimers: true,
+      preserveStorageOnReload: true,
+    })
+    await openStablePage(page)
+    await page.getByTestId('theme-mode-beijing').click()
+    await expectVisitorThemeState(page, 'beijing', boundary.before)
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('themeMode'))).toBe('beijing')
+
+    await fixture.advanceTime(60_000)
+    await expectVisitorThemeState(page, 'beijing', boundary.after)
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('themeMode'))).toBe('beijing')
+    expect(fixture.getThemeSaveCount()).toBe(0)
+  })
+}
+
+test('v2.7.1 theme selection reuses the existing central Beijing clock without scheduling per-click timers', async ({ page }) => {
+  await installKomariFixture(page, {
+    managedThemeMode: 'beijing',
+    fakeTimers: true,
+  })
+  await openStablePage(page)
+  await page.evaluate(() => {
+    const host = window as typeof window & { __themeSelectionTimerCount?: () => number }
+    const nativeSetInterval = window.setInterval.bind(window)
+    let intervalCount = 0
+    window.setInterval = ((...args: Parameters<typeof window.setInterval>) => {
+      intervalCount += 1
+      return nativeSetInterval(...args)
+    }) as typeof window.setInterval
+    host.__themeSelectionTimerCount = () => intervalCount
+  })
+
+  for (const mode of ['light', 'beijing', 'dark'] as const)
+    await page.getByTestId(`theme-mode-${mode}`).click()
+  expect(await page.evaluate(() => (window as typeof window & { __themeSelectionTimerCount?: () => number }).__themeSelectionTimerCount?.())).toBe(0)
+})
+
+test('v2.7.1 Beijing automatic source keeps the single UTC+8 07:00-18:59 schedule without system-theme hooks', () => {
+  const source = readFileSync(new URL('../../src/stores/app.ts', import.meta.url), 'utf8')
+  expect(source.match(/window\.setInterval\(/g)).toHaveLength(1)
+  expect(source).toContain('timeZone: \'Asia/Shanghai\'')
+  expect(source).toContain('hour >= 7 && hour < 19')
+  expect(source).not.toContain('prefers-color-scheme')
+  expect(source).not.toContain('visibilitychange')
+})
+
+test('v2.7.1 theme and visitor tools remain visible, ordered, and non-overlapping at 360-430px', async ({ page }) => {
+  await installKomariFixture(page, {
+    adminAccess: 'admin',
+    siteName: 'MyVpsMonitor Long Mobile Header',
+  })
+  await openStablePage(page, '/', 'MyVpsMonitor Long Mobile Header')
+
+  const controls = page.getByTestId('header-actions').locator('button')
+  for (const width of [360, 375, 390, 430]) {
+    await page.setViewportSize({ width, height: 844 })
+    await expect(controls).toHaveCount(6)
+    for (let index = 0; index < 6; index += 1)
+      await expect(controls.nth(index)).toBeVisible()
+
+    const layout = await page.getByTestId('header-actions').evaluate((actions) => {
+      const header = actions.parentElement
+      const site = header?.firstElementChild
+      const actionBox = actions.getBoundingClientRect()
+      const siteBox = site?.getBoundingClientRect()
+      const buttonBoxes = Array.from(actions.querySelectorAll('button'), button => button.getBoundingClientRect())
+      return {
+        contained: actions.scrollWidth <= actions.clientWidth + 1,
+        headerContained: header ? header.scrollWidth <= header.clientWidth + 1 : false,
+        separated: siteBox ? siteBox.right <= actionBox.left + 1 : false,
+        buttonsInsideViewport: buttonBoxes.every(box => box.left >= 0 && box.right <= window.innerWidth),
+        buttonWidths: buttonBoxes.map(box => box.width),
+      }
+    })
+    expect(layout.contained).toBe(true)
+    expect(layout.headerContained).toBe(true)
+    expect(layout.separated).toBe(true)
+    expect(layout.buttonsInsideViewport).toBe(true)
+    expect(layout.buttonWidths.every(value => value >= 32)).toBe(true)
+  }
+})
 
 test('home light desktop', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
@@ -3048,7 +3253,8 @@ test.describe('node-card per-node ping task bindings', () => {
     expect(latencyStates).not.toContain('confirmed-missing')
   })
 
-  test('v1.3.3 turns a genuinely absent current bucket into CONFIRMED_MISSING only after its finite decision deadline', async ({ page }) => {
+  test('v2.7.1 keeps open and newly closed buckets pending before finalizing a successful empty interval', async ({ page }) => {
+    test.setTimeout(120_000)
     await page.setViewportSize({ width: 1280, height: 720 })
     const fixture = await installKomariFixture(page, {
       fakeTimers: true,
@@ -3062,29 +3268,49 @@ test.describe('node-card per-node ping task bindings', () => {
     await openStablePage(page)
     await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'pending')
 
-    // The previous real 11:59 sample expects the 12:00 sample. The decision
-    // deadline is its 5 s write grace plus the bounded 5/10/20 s retry budget.
+    // Exhausting the retries does not finalize an interval that is still open.
     for (const delay of [5_000, 5_000, 10_000, 20_000, 5_000])
       await fixture.advanceTime(delay)
+    await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'pending')
+
+    // The just-closed bucket remains provisional for the same existing 40 s
+    // grace/retry budget, then a later successful empty refresh finalizes it.
+    await fixture.advanceTime(135_000)
+    await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'pending')
+    await fixture.advanceTime(60_000)
 
     for (const metric of ['latency', 'loss'] as const)
       await expectNodeCardPingBucketState(page, metric, PING_INGESTION_BUCKET, 'confirmed-missing')
-    await expectNodeCardPingTooltip(page, 'latency', '12:00–12:03\n暂无采样')
+    const noSampleLatency = nodeCardPingBucket(page, 'latency', PING_INGESTION_BUCKET)
+    const noSampleLoss = nodeCardPingBucket(page, 'loss', PING_INGESTION_BUCKET)
+    await expect(noSampleLatency).toHaveAttribute('data-node-ping-severity', 'missing')
+    await expect(noSampleLoss).toHaveAttribute('data-node-ping-severity', 'missing')
+    await expect(noSampleLatency).toHaveAttribute('aria-label', /无采样/)
+    await expect(noSampleLatency).not.toHaveAttribute('aria-label', /100%|不可达/)
+    const noSampleStyles = await Promise.all([noSampleLatency, noSampleLoss].map(locator => locator
+      .locator('[data-node-ping-bucket-fill]')
+      .evaluate((element) => {
+        const style = getComputedStyle(element)
+        return { backgroundImage: style.backgroundImage, opacity: style.opacity }
+      })))
+    expect(noSampleStyles.every(style => style.backgroundImage.includes('repeating-linear-gradient'))).toBe(true)
+    expect(noSampleStyles.every(style => Number(style.opacity) < 1)).toBe(true)
+    await expectNodeCardPingTooltip(page, 'latency', '12:00–12:03\n无采样')
     await nodeCardPingBucket(page, 'latency', PING_INGESTION_BUCKET).hover()
-    await expect(page.locator('[data-slot="data-tooltip-content"]')).toContainText('暂无采样')
+    await expect(page.locator('[data-slot="data-tooltip-content"]')).toContainText('无采样')
     await page.keyboard.press('Escape')
     await fixture.advanceTime(10_000)
     await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'confirmed-missing')
 
     const selectedQueries = selectedPingMetricTimelineEntries(fixture.timeline)
     expect(selectedQueries.length).toBeGreaterThanOrEqual(4)
-    expect(selectedQueries.length).toBeLessThanOrEqual(6)
+    expect(selectedQueries.length).toBeLessThanOrEqual(14)
     expect(selectedQueries.every(entry => entry.responseSamples
       .every(sample => sample.sampleAt !== Date.parse(PING_INGESTION_SAMPLE)))).toBe(true)
   })
 
-  test('v1.3.3 backfills a late real sample from CONFIRMED_MISSING to DATA without inventing a value', async ({ page }) => {
-    test.setTimeout(45_000)
+  test('v2.7.1 backfills a late real sample from CONFIRMED_MISSING to DATA without inventing a value', async ({ page }) => {
+    test.setTimeout(90_000)
     await page.setViewportSize({ width: 1280, height: 720 })
     const fixture = await installKomariFixture(page, {
       fakeTimers: true,
@@ -3092,18 +3318,18 @@ test.describe('node-card per-node ping task bindings', () => {
       nodeCardPingTaskBindings: primaryBinding(202),
       nodeCardPingFixture: {
         metric: 'valid',
-        sampleSchedule: scheduledPingSamples('2026-07-25T12:00:50.000+08:00', 11),
+        sampleSchedule: scheduledPingSamples('2026-07-25T12:05:20.000+08:00', 11),
       },
     })
     await openStablePage(page)
 
     for (const delay of [5_000, 5_000, 10_000, 20_000, 5_000])
       await fixture.advanceTime(delay)
+    await fixture.advanceTime(195_000)
     await expectNodeCardPingBucketState(page, 'latency', PING_INGESTION_BUCKET, 'confirmed-missing')
 
-    // Once all finite retries are exhausted the scheduler waits for the next
-    // sample-aware heartbeat. The late backend value must replace the real gap.
-    await fixture.advanceTime(56_000)
+    // A later heartbeat sees the delayed backend value and replaces the gap.
+    await fixture.advanceTime(90_000)
     for (const metric of ['latency', 'loss'] as const)
       await expectNodeCardPingBucketState(page, metric, PING_INGESTION_BUCKET, 'data')
     await expectNodeCardPingTooltip(page, 'latency', '12:00–12:03\n延迟：11 ms\n丢包：0.0%\n最新样本：12:00:00')
@@ -3599,13 +3825,16 @@ test.describe('node-card per-node ping task bindings', () => {
       const latencyTimes = (await latencyBars.evaluateAll(elements => elements.map(element => element.getAttribute('aria-label') ?? ''))).map(text => text.trim().split(/\s+/)[0])
       const lossTimes = (await lossBars.evaluateAll(elements => elements.map(element => element.getAttribute('aria-label') ?? ''))).map(text => text.trim().split(/\s+/)[0])
       expect(latencyTimes).toEqual(lossTimes)
-      expect(latencyTimes).toEqual([...latencyTimes].sort())
+      const finalizedLatencyTimes = latencyTimes.filter(Boolean)
+      expect(finalizedLatencyTimes).toEqual([...finalizedLatencyTimes].sort())
 
       if (sampleCount === 1) {
         const latencyStates = await primaryNodeCard(page)
           .locator('[data-node-ping-bars="latency"] > [data-node-ping-bar]')
           .evaluateAll(elements => elements.map(element => element.getAttribute('data-node-ping-state')))
-        expect(latencyStates.filter(state => state === 'confirmed-missing')).toHaveLength(19)
+        expect(latencyStates.filter(state => state === 'confirmed-missing')).toHaveLength(18)
+        expect(latencyStates.filter(state => state === 'pending')).toHaveLength(1)
+        expect(latencyStates.filter(state => state === 'data')).toHaveLength(1)
       }
     })
   }

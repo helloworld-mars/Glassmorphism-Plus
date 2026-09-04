@@ -2,6 +2,20 @@
 
 本文件只记录 **Glassmorphism Plus** 自己的发行版本。原始 Glassmorphism 的版本历史请查看[上游仓库](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases)；Plus 的选择性同步记录见 [UPSTREAM.md](UPSTREAM.md)。
 
+## [2.7.1] - 2026-09-04
+
+### Fixed
+
+- 首页节点卡片将成功查询后仍为空的已结束 Ping bucket 明确收敛为“无采样”：延迟与丢包保持空值、不计入平均，并使用红色低透明斜纹内描边，与真实 `100%` 丢包的不可达实心红状态区分。
+- 当前采集桶始终保持等待；刚关闭的桶沿用既有写入宽限与有限重试预算，连续离线桶可各自收敛，迟到真实样本仍可把“无采样”恢复为数据或不可达。
+- 移除首页 Header 工具按钮重复的黑色自定义 Tooltip，只保留浏览器原生 `title`，并保留 `aria-label` 与键盘焦点能力。
+- Header 主题快捷入口改为“浅色模式／北京时间自动／深色模式”三个直接选择按钮；访客显式偏好沿用既有本地键并优先于后台默认，“北京时间自动”复用现有 UTC+8 07:00–18:59 明亮、19:00–06:59 暗色的中央时钟逻辑。
+
+### Compatibility and performance
+
+- Ping RPC、请求参数、Metric／Legacy、批处理、去重、缓存键、调度器、并发、任务目录、长范围图表、绑定与三分钟 20 bucket 几何均未修改；未增加生产依赖、请求或 timer。
+- 继续兼容 Komari `1.4.3`。
+
 ## [2.7.0] - 2026-09-04
 
 ### Fixed

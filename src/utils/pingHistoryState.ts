@@ -18,30 +18,16 @@ export interface PingHistoryBucketTiming {
   canConfirmMissing: boolean
 }
 
-function normalizeInterval(value: number): number {
-  const refresh = CACHE_CONFIG.nodePingSummary.refresh
-  return Number.isFinite(value) && value > 0
-    ? Math.max(refresh.schedulerTick, Math.floor(value))
-    : refresh.heartbeat
-}
-
 /**
- * The deadline is derived from a real sample cadence and the scheduler's
- * bounded retry budget. A newly opened bucket is never missing merely because
- * its first query raced normal metric ingestion.
+ * A closed bucket remains provisional for the coordinator's existing write
+ * grace and bounded retry budget. The helper creates no timers or requests.
  */
 export function getPingBucketDecisionDeadline({
-  bucketStart,
-  latestAcceptedSampleAt,
-  firstObservedAt,
-  taskIntervalMs,
-}: Pick<PingHistoryBucketTiming, 'bucketStart' | 'latestAcceptedSampleAt' | 'firstObservedAt' | 'taskIntervalMs'>): number {
+  bucketEnd,
+}: Pick<PingHistoryBucketTiming, 'bucketEnd'>): number {
   const refresh = CACHE_CONFIG.nodePingSummary.refresh
-  const expectedSampleAt = latestAcceptedSampleAt === null
-    ? Math.max(bucketStart, firstObservedAt)
-    : Math.max(bucketStart, latestAcceptedSampleAt + normalizeInterval(taskIntervalMs))
   const retryBudget = refresh.retryDelays.reduce((total, delay) => total + delay, 0)
-  return expectedSampleAt + refresh.sampleWriteGrace + retryBudget
+  return bucketEnd + refresh.sampleWriteGrace + retryBudget
 }
 
 /**
@@ -61,11 +47,16 @@ export function resolvePingHistoryBucketState(
   if (!timing.canConfirmMissing)
     return 'pending'
 
-  const isOpenBucket = timing.now >= timing.bucketStart && timing.now < timing.bucketEnd
-  if (!isOpenBucket)
-    return 'confirmed-missing'
+  // An open (or future) bucket has not finished collecting samples. Keep it
+  // pending regardless of the retry deadline so an empty in-progress interval
+  // is never presented as a final data-quality result.
+  if (timing.now < timing.bucketEnd)
+    return 'pending'
 
-  return timing.now < getPingBucketDecisionDeadline(timing)
-    ? 'pending'
-    : 'confirmed-missing'
+  // The newest closed bucket absorbs normal write lag and the coordinator's
+  // bounded retries. Older successfully queried buckets settle independently.
+  if (timing.now < getPingBucketDecisionDeadline(timing))
+    return 'pending'
+
+  return 'confirmed-missing'
 }

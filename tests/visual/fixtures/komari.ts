@@ -17,6 +17,7 @@ const REGION_FIXTURES = [
 
 export interface VisualFixtureOptions {
   dark?: boolean
+  managedThemeMode?: 'beijing' | 'light' | 'dark'
   earthRenderer?: 'cobe' | 'realistic' | 'tiled'
   colorVisionFriendly?: boolean
   viewMode?: 'card' | 'list'
@@ -1032,7 +1033,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
   let siteName = options.siteName ?? 'Komari Visual Lab'
   let themeSaveCount = 0
   let settings: Record<string, unknown> = {
-    themeMode: options.dark ? 'dark' : 'light',
+    themeMode: options.managedThemeMode ?? (options.dark ? 'dark' : 'light'),
     dataUpdateInterval: 60,
     rpcTransportMode: 'http',
     defaultViewMode: options.viewMode ?? 'card',

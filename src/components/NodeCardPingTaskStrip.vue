@@ -64,7 +64,7 @@ const statusText = computed(() => {
   return ({
     pending: '等待采样',
     data: '',
-    confirmed_missing: '暂无采样',
+    confirmed_missing: '无采样',
     error: '更新失败',
     stale: '数据稍旧',
   } as const)[status.value]
@@ -130,7 +130,7 @@ function bucketTooltipDetails(point: NodeCardPingHistoryPoint): {
   }
   if (point.latency === null && point.loss === null) {
     const missing = point.latencyState === 'confirmed-missing' || point.lossState === 'confirmed-missing'
-    return { interval, sampleTimestamp, status: missing ? '暂无采样' : '等待采样', latency: '', loss: '', stale: false }
+    return { interval, sampleTimestamp, status: missing ? '无采样' : '等待采样', latency: '', loss: '', stale: false }
   }
   return {
     interval,

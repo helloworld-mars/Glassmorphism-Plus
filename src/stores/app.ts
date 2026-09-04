@@ -8,7 +8,7 @@ import { getAuthSession, requirePermission, setAuthSessionFromLogin, verifyLogin
 import { parseNodeCardPingTaskBindings } from '@/utils/nodeCardPingBindings'
 import { resolveNodeCardPingRuntimeConfig } from '@/utils/nodeCardPingConfig'
 
-export type ThemeMode = 'auto' | 'light' | 'dark'
+export type ThemeMode = 'auto' | 'beijing' | 'light' | 'dark'
 export type ManagedThemeMode = 'beijing' | 'light' | 'dark'
 export type GeneralCardKey
   = | 'currentTime'
@@ -572,7 +572,7 @@ const KEY_LIST_SEPARATOR_REGEX = /[\s,，;；]+/u
 const EMPTY_THEME_SETTINGS: ThemeSettings = {}
 
 function isValidThemeMode(value: unknown): value is ThemeMode {
-  return value === 'auto' || value === 'light' || value === 'dark'
+  return value === 'auto' || value === 'beijing' || value === 'light' || value === 'dark'
 }
 
 function isValidManagedThemeMode(value: unknown): value is ManagedThemeMode {
@@ -1244,18 +1244,21 @@ const useAppStore = defineStore('app', () => {
     return hour >= 7 && hour < 19
   })
 
-  // 计算当前是否为暗色模式。本机按钮选择 auto 时跟随后台托管设置；手动选择浅色/深色时仅覆盖当前浏览器。
-  const isDark = computed(() => {
+  // `auto` is the legacy/no-explicit-preference sentinel that follows the
+  // managed default. A visitor who explicitly chooses Beijing automatic mode
+  // stores `beijing` in the same existing local preference key.
+  const selectedThemeMode = computed<ManagedThemeMode>(() => {
     const localMode = isValidThemeMode(themeMode.value) ? themeMode.value : 'auto'
-    if (localMode === 'light')
+    return localMode === 'auto' ? managedThemeMode.value : localMode
+  })
+
+  // 计算当前是否为暗色模式。访客明确选择优先于后台默认；北京时间自动复用唯一中央时钟。
+  const isDark = computed(() => {
+    if (selectedThemeMode.value === 'light')
       return false
-    if (localMode === 'dark')
+    if (selectedThemeMode.value === 'dark')
       return true
-
-    if (managedThemeMode.value === 'beijing')
-      return !isBeijingDaytime.value
-
-    return managedThemeMode.value === 'dark'
+    return !isBeijingDaytime.value
   })
 
   const resolvedThemeMode = computed<'light' | 'dark'>(() => isDark.value ? 'dark' : 'light')
@@ -1268,20 +1271,8 @@ const useAppStore = defineStore('app', () => {
     return lightBackgroundUrl.value
   })
 
-  function updateThemeMode(mode?: ThemeMode) {
-    if (mode) {
-      themeMode.value = isValidThemeMode(mode) ? mode : 'auto'
-      return
-    }
-
-    const nextMode: Record<ThemeMode, ThemeMode> = {
-      auto: 'light',
-      light: 'dark',
-      dark: 'auto',
-    }
-
-    const currentMode = isValidThemeMode(themeMode.value) ? themeMode.value : 'auto'
-    themeMode.value = nextMode[currentMode]
+  function updateThemeMode(mode: ThemeMode) {
+    themeMode.value = isValidThemeMode(mode) ? mode : 'auto'
   }
 
   function syncAuthState() {
@@ -1312,6 +1303,7 @@ const useAppStore = defineStore('app', () => {
     themeMode,
     managedThemeMode,
     isBeijingDaytime,
+    selectedThemeMode,
     isDark,
     resolvedThemeMode,
     lang,

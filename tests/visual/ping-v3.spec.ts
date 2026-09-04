@@ -568,7 +568,7 @@ test.describe('Ping v3 Chinese configuration and task-strip behavior', () => {
     await expect(pendingStrip.locator('[data-node-ping-state="confirmed-missing"]')).not.toHaveCount(0)
     const missingBucket = pendingStrip.locator('[data-node-ping-state="confirmed-missing"]').first()
     await missingBucket.focus()
-    await expect(activeDataTooltip(page)).toContainText('暂无采样')
+    await expect(activeDataTooltip(page)).toContainText('无采样')
     expectFixedRailGeometry(await readTaskStripGeometry(pendingStrip), 4, 9, 2)
 
     fixture.setNodeCardPingFixture({ metric: 'error', legacy: 'error' })

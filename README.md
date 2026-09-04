@@ -35,23 +35,23 @@
 
 | 项目               | 当前状态                                                                                                               |
 | :----------------- | :--------------------------------------------------------------------------------------------------------------------- |
-| 当前 Plus 版本     | **v2.7.0**                                                                                                             |
+| 当前 Plus 版本     | **v2.7.1**                                                                                                             |
 | 上游同步基线       | [sanrokamlan Glassmorphism v3.3.7](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases/tag/v3.3.7) |
 | 当前维护者         | [helloworld-mars](https://github.com/helloworld-mars)                                                                  |
 | 适用平台           | [Komari Monitor](https://github.com/komari-monitor/komari)                                                             |
 | 已验证 Komari 版本 | **1.4.3**                                                                                                              |
 | 技术栈             | Vue 3、TypeScript、Vite 7、Tailwind CSS 4、Pinia、ECharts、Bun                                                         |
-| 源码发布           | GitHub `main` 与 `v2.7.0` Release；Release 默认附加唯一、已验证的客户安装包                                            |
+| 源码发布           | GitHub `main` 与 `v2.7.1` Release；Release 默认附加唯一、已验证的客户安装包                                            |
 | 本地安装包         | `<version>/Glassmorphism-Plus-release-<version>.zip`                                                                   |
 
 Glassmorphism Plus 是独立维护的 Glassmorphism 衍生主题，Plus 使用自己的版本体系；上游 v3.3.7 仅代表当前同步基线，并非 Plus 的版本号。同步来源、选择性合并和署名详见 [UPSTREAM.md](UPSTREAM.md)。
 
-### ✨ 最新版本 · v2.7.0
+### ✨ 最新版本 · v2.7.1
 
-- 节点详情页与首页 Ping 弹窗的相对时间范围现在以最新最终真实样本作为显示终点，不再保留共同的无数据尾部。
-- 保留请求起止范围、长时间历史和内部真实缺口；自定义固定范围继续严格使用用户指定的开始与结束时间。
-- 提高浅色主题首页节点卡片、三块信息面板与 Ping 任务条的边界清晰度，深色主题保持原有效果。
-- 本版不改动 Ping RPC、请求参数、归一化、缓存、调度、三分钟 bucket、Tooltip 或绑定行为。
+- 已结束且成功查询仍为空的 Ping bucket 明确显示为“无采样”，使用红色低透明斜纹内描边，并继续与真实 `100%` 丢包的不可达状态区分。
+- 当前桶与刚关闭仍处于既有宽限／有限重试预算内的桶保持等待；连续离线桶可各自收敛，迟到真实样本仍会恢复为数据或不可达。
+- 首页顶部工具按钮只保留浏览器原生提示，不再叠加黑色自定义 Tooltip；访客端主题入口改为“浅色模式／北京时间自动／深色模式”三个直接选择按钮，选择会使用既有本地偏好键持久化。
+- 本版不改动 Ping RPC、请求参数、Metric／Legacy、缓存、调度、三分钟 bucket 几何、任务绑定或长范围图表行为。
 
 ---
 
@@ -143,7 +143,7 @@ Glassmorphism Plus 是独立维护的 Glassmorphism 衍生主题，Plus 使用�
 
 ### 重要说明
 
-- **v2.7.0 GitHub Release 默认附加且只附加一个已验证的 installer asset：** `Glassmorphism-Plus-release-2.7.0.zip`。
+- **v2.7.1 GitHub Release 默认附加且只附加一个已验证的 installer asset：** `Glassmorphism-Plus-release-2.7.1.zip`。
 - GitHub 自动生成的 **Source code (zip)** 是源码快照，**不是** Komari 可安装主题包。
 - Komari 的远程仓库导入流程应使用正式 Release 中的 installer asset；仍不要用 GitHub 自动生成的源码压缩包代替。
 
@@ -224,7 +224,7 @@ bun run release:prepare
 
 ## 📝 版本历史
 
-当前版本更新见上方「最新版本 · v2.7.0」。
+当前版本更新见上方「最新版本 · v2.7.1」。
 
 <details>
 <summary><strong>📚 查看历史版本更新</strong></summary>

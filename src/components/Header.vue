@@ -4,7 +4,6 @@ import { computed, inject, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorInfo from '@/components/VisitorInfo.vue'
 import { useVisitorAudit } from '@/composables/useVisitorAudit'
 import { useAppStore } from '@/stores/app'
@@ -17,21 +16,13 @@ const isScrolled = inject<ReturnType<typeof ref<boolean>>>('isScrolled', ref(fal
 
 const siteFavicon = ref('/favicon.ico')
 
+const themeButtons = [
+  { title: '浅色模式', icon: 'icon-park-outline:sun-one', mode: 'light' },
+  { title: '北京时间自动', icon: 'tabler:sun-moon', mode: 'beijing' },
+  { title: '深色模式', icon: 'icon-park-outline:moon', mode: 'dark' },
+] as const
+
 const actionButtons = computed(() => {
-  const themeTitleMap = {
-    auto: appStore.managedThemeMode === 'beijing'
-      ? appStore.isBeijingDaytime ? '自动主题：北京时间日间' : '自动主题：北京时间夜间'
-      : appStore.managedThemeMode === 'light' ? '自动主题：后台浅色' : '自动主题：后台深色',
-    light: '浅色主题',
-    dark: '深色主题',
-  } as const
-
-  const themeIconMap = {
-    auto: appStore.isDark ? 'icon-park-outline:moon' : 'icon-park-outline:sun-one',
-    light: 'icon-park-outline:sun-one',
-    dark: 'icon-park-outline:moon',
-  } as const
-
   const buttons: Array<{ title: string, icon: string, action: string, pressed?: boolean }> = []
 
   if (router.currentRoute.value.name === 'home' && appStore.homeToolsEnabled) {
@@ -42,12 +33,6 @@ const actionButtons = computed(() => {
       pressed: appStore.homeAdvancedToolsVisible,
     })
   }
-
-  buttons.push({
-    title: `${themeTitleMap[appStore.themeMode]}（点击切换）`,
-    icon: themeIconMap[appStore.themeMode],
-    action: 'toggleTheme',
-  })
 
   if (router.currentRoute.value.name === 'home' && !appStore.loading && !appStore.hidePingTaskBindingEntry) {
     buttons.push({
@@ -70,15 +55,6 @@ const actionButtons = computed(() => {
 
 function handleButtonClick(action: string) {
   switch (action) {
-    case 'toggleTheme':
-      appStore.updateThemeMode()
-      void recordVisitorEvent({
-        event: 'theme_mode_change',
-        path: router.currentRoute.value.path,
-        route: String(router.currentRoute.value.name ?? ''),
-        target: appStore.themeMode,
-      })
-      break
     case 'toggleHomeTools':
       appStore.homeAdvancedToolsVisible = !appStore.homeAdvancedToolsVisible
       break
@@ -99,6 +75,16 @@ function handleButtonClick(action: string) {
   }
 }
 
+function selectThemeMode(mode: 'light' | 'beijing' | 'dark') {
+  appStore.updateThemeMode(mode)
+  void recordVisitorEvent({
+    event: 'theme_mode_change',
+    path: router.currentRoute.value.path,
+    route: String(router.currentRoute.value.name ?? ''),
+    target: mode,
+  })
+}
+
 const sitename = computed(() => appStore.siteName)
 </script>
 
@@ -110,37 +96,54 @@ const sitename = computed(() => appStore.siteName)
     class="transition-all duration-200 top-0 sticky z-10 border-b border-transparent"
     :class="isScrolled ? '!border-slate-500/10 backdrop-blur-lg' : 'bg-transparent'"
   >
-    <div class="px-4 flex-between h-14 max-w-[1280px] mx-auto">
-      <div class="flex items-center gap-3 cursor-pointer" @click="router.push('/')">
-        <Avatar class="size-8">
+    <div class="px-4 flex-between h-14 max-w-[1280px] mx-auto gap-2">
+      <div class="flex min-w-0 items-center gap-2 sm:gap-3 cursor-pointer" @click="router.push('/')">
+        <Avatar class="size-8 shrink-0">
           <AvatarImage :src="siteFavicon" :alt="sitename" />
           <AvatarFallback>{{ sitename.slice(0, 1) }}</AvatarFallback>
         </Avatar>
-        <h3 class="m-0 text-lg font-semibold">
+        <h3 class="m-0 min-w-0 truncate text-base font-semibold sm:text-lg">
           {{ sitename }}
         </h3>
       </div>
-      <TooltipProvider :delay-duration="200">
-        <div class="flex items-center gap-2">
-          <Tooltip v-for="button in actionButtons" :key="button.action">
-            <TooltipTrigger as-child>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                :aria-label="button.title"
-                :title="button.title"
-                :data-testid="button.action === 'openPingCenter' ? 'ping-center-entry' : undefined"
-                :aria-pressed="button.pressed"
-                :class="button.pressed && 'bg-background/70 text-selection'"
-                @click="handleButtonClick(button.action)"
-              >
-                <Icon :icon="button.icon" :width="18" :height="18" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{{ button.title }}</TooltipContent>
-          </Tooltip>
+      <div class="ml-1 flex shrink-0 items-center gap-0.5 sm:gap-2" data-testid="header-actions">
+        <div
+          class="inline-flex shrink-0 items-center rounded-lg bg-background/35 p-0.5 ring-1 ring-border/40"
+          role="group"
+          aria-label="主题模式"
+          data-testid="header-theme-group"
+        >
+          <Button
+            v-for="button in themeButtons"
+            :key="button.mode"
+            variant="ghost"
+            size="icon-sm"
+            class="rounded-md"
+            :class="appStore.selectedThemeMode === button.mode && 'bg-background/80 text-selection shadow-sm ring-1 ring-border/60'"
+            :aria-label="button.title"
+            :title="button.title"
+            :aria-pressed="appStore.selectedThemeMode === button.mode"
+            :data-testid="`theme-mode-${button.mode}`"
+            @click="selectThemeMode(button.mode)"
+          >
+            <Icon :icon="button.icon" :width="18" :height="18" />
+          </Button>
         </div>
-      </TooltipProvider>
+        <Button
+          v-for="button in actionButtons"
+          :key="button.action"
+          variant="ghost"
+          size="icon-sm"
+          :aria-label="button.title"
+          :title="button.title"
+          :data-testid="button.action === 'openPingCenter' ? 'ping-center-entry' : undefined"
+          :aria-pressed="button.pressed"
+          :class="button.pressed && 'bg-background/70 text-selection'"
+          @click="handleButtonClick(button.action)"
+        >
+          <Icon :icon="button.icon" :width="18" :height="18" />
+        </Button>
+      </div>
     </div>
   </div>
 </template>

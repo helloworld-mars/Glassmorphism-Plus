@@ -2,6 +2,7 @@ import type { NodeCardPingHistoryPoint } from '@/types/node-card-ping'
 
 export type NodeCardPingSeverity
   = | 'neutral'
+    | 'missing'
     | 'excellent'
     | 'good'
     | 'moderate'
@@ -59,6 +60,8 @@ export function latencyBucketSeverity(
     return 'unreachable'
   if (point.latency !== null)
     return classifyNodeCardLatency(point.latency)
+  if (point.latencyState === 'confirmed-missing')
+    return 'missing'
   if (requestFailed && point.latencyState === 'pending')
     return 'error'
   return 'neutral'
@@ -72,6 +75,8 @@ export function lossBucketSeverity(
     return 'unreachable'
   if (point.loss !== null)
     return classifyNodeCardLoss(point.loss)
+  if (point.lossState === 'confirmed-missing')
+    return 'missing'
   if (requestFailed && point.lossState === 'pending')
     return 'error'
   return 'neutral'
