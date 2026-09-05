@@ -38,8 +38,8 @@ Komari-importable theme ZIP; it is not a generic standalone web deployment.
 Protected project identity:
 
 - Product: Komari Glassmorphism Plus
-- Maintainer: helloworld-mars
-- Repository: `https://github.com/helloworld-mars/Glassmorphism-Plus`
+- Maintainer: VoyagerProbe
+- Repository: `https://github.com/VoyagerProbe/Glassmorphism-Plus`
 - Upstream author: sanrokamlan
 - Upstream repository: `https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism`
 
@@ -154,11 +154,8 @@ Never solve a merge by replacing the current Plus tree with another source tree.
 
 ## 8. Dependency policy
 
-Prefer the repository lockfile. Normal dependency verification is:
-
-```bash
-bun install --frozen-lockfile
-```
+Reuse installed dependencies when they match the repository lockfile. Only when
+missing or inconsistent, run `bun install --frozen-lockfile` once.
 
 Do not automatically run `bun update` or `npm update`. Use them only when the
 user explicitly requests it, an intentional upstream change requires it, or a
@@ -183,10 +180,14 @@ bun run release:prepare
 bun run preview
 ```
 
-`bun run build` performs type-checking and the production Vite build. `bun run
-test:visual` runs the deterministic Playwright regression suite after a
-`build-only` build. `bun run lint` currently includes `--fix`, so always inspect
-the resulting diff.
+`bun run build` includes type-checking: one successful build covers both gates.
+Do not repeat type-check or rebuild unchanged inputs. `bun run test:visual`
+builds again; use the installed Playwright CLI to reuse validated dist when safe.
+Use installed ESLint on changed files without automatic unrelated fixes; the
+project lint script includes `--fix`, so scope it and review the resulting diff.
+Run directly relevant Chromium regressions and risk-matched WebKit/mobile checks.
+Expand coverage only for shared behavior changes, exposed regressions, or failed
+artifact startup. Unrun full suites must be reported as unrun, never passed.
 
 Do not invent `bun test`, Vitest, or another test framework unless it actually
 exists in the repository. Never claim an unexecuted command passed.
@@ -216,14 +217,12 @@ blocker prevents a required step:
 ```text
 canonical source implementation
   -> dependency verify/install
-  -> type-check
-  -> lint and resulting-diff review
-  -> targeted regression tests
-  -> build (creates the installer ZIP)
-  -> broader Playwright/browser regression
-  -> privacy and sensitive-data scan
-  -> Git status/diff/staged-file review
-  -> version consistency verification
+  -> scoped lint and resulting-diff review
+  -> necessary failing regression reproduction
+  -> build including type-check (creates the installer ZIP)
+  -> risk-matched Playwright/browser regression on the same artifact
+  -> final artifact startup check on Komari-compatible paths
+  -> combined privacy, Git diff/staged-file, version and identity review
   -> establish the final approved source state
   -> versioned publish clone
   -> filtered release snapshot
@@ -257,6 +256,10 @@ For a version bump, inspect genuine current-version locations such as:
 - README current-version text;
 - manifest/build tests;
 - release metadata.
+
+The shared footer version attribution line is `v<current manifest version> ·
+VoyagerProbe`, using the existing build variable. Keep upstream attribution in
+repository documentation and preserve LICENSE.
 
 Do not blindly replace version-looking values in historical changelog entries,
 old release notes, upstream/Komari versions, dependency versions, schema/cache
@@ -344,7 +347,7 @@ after understanding the implications.
 The formal repository is:
 
 ```text
-https://github.com/helloworld-mars/Glassmorphism-Plus
+https://github.com/VoyagerProbe/Glassmorphism-Plus
 ```
 
 The formal branch is `main`. Before a formal commit, push, or release, run and
@@ -436,7 +439,7 @@ for accidental sensitive or local material, including:
 - real local absolute user-profile paths.
 
 Never commit browser debugging/authentication state. Normal public metadata is not
-a secret merely because it contains `helloworld-mars`, `sanrokamlan`, public
+a secret merely because it contains `VoyagerProbe`, `sanrokamlan`, public
 GitHub URLs, LICENSE text, public RPC method names, test UUIDs, or fixture data.
 
 Keep `.gitignore` narrowly protective: do not broadly ignore legitimate tracked
@@ -559,40 +562,13 @@ succeeds, or an installer ZIP exists. Applicable completion gates include:
 If a required gate cannot be completed, report the task as blocked or partially
 verified rather than fully complete.
 
-## 25. Fixed formal release report
+## 25. Concise formal release report
 
-Every completed formal release report must state:
-
-1. canonical modification directory;
-2. changed source files;
-3. root cause or feature behavior;
-4. architecture/data-flow decisions;
-5. dependency status;
-6. type-check result;
-7. lint result;
-8. build result;
-9. targeted regression result;
-10. Playwright/browser result;
-11. privacy scan result;
-12. Git status/diff/staged review;
-13. version consistency;
-14. publish clone path;
-15. release snapshot path;
-16. local customer installer path;
-17. installer size;
-18. ZIP root structure;
-19. manifest version;
-20. installer upload result or explicit opt-out, custom asset count, local and
-    downloaded SHA-256 parity, remote manifest/root verification, and temporary
-    download cleanup;
-21. origin;
-22. branch;
-23. final commit hash;
-24. non-force push result;
-25. GitHub main verification;
-26. Release tag/target/assets when applicable;
-27. remaining limitations;
-28. recommended follow-up.
+Summarize completed changes, actual causes and fix locations; executed validation
+and intentionally unrun checks; privacy/identity/copyright review; final commit,
+Release URL, installer name/size/SHA-256 and downloaded parity; remaining limits.
+Keep detailed file lists, logs, command output and provenance evidence locally.
+Do not repeat an exhaustive historical matrix or claim unexecuted verification.
 
 ## 26. Permanent-rule maintenance
 

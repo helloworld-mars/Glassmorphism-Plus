@@ -8,9 +8,8 @@ const api = getSharedApi()
 
 const buildVersion = __BUILD_VERSION__
 const buildGitHash = __BUILD_GIT_HASH__
-const themeMaintainer = 'helloworld-mars'
-const themeRepository = 'https://github.com/helloworld-mars/Glassmorphism-Plus'
-const originalThemeRepository = 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism'
+const themeMaintainer = 'VoyagerProbe'
+const themeRepository = 'https://github.com/VoyagerProbe/Glassmorphism-Plus'
 
 const serverVersion = ref<VersionInfo | null>(null)
 
@@ -62,13 +61,6 @@ const themeBuildDetails = computed(() => {
           <DataTooltip as="span" placement="top" :content="themeBuildDetails">
             <span>v{{ buildVersion }} · {{ themeMaintainer }}</span>
           </DataTooltip>
-          <span aria-hidden="true">·</span>
-          <a
-            :href="originalThemeRepository" target="_blank" rel="noopener noreferrer"
-            class="transition-opacity hover:opacity-80"
-          >
-            Based on the original theme by sanrokamlan
-          </a>
         </div>
       </div>
     </div>

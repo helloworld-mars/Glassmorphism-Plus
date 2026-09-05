@@ -945,7 +945,7 @@ onBeforeUnmount(() => {
                         <Icon icon="carbon:information" :width="14" :height="14" />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent class="!rounded p-3">
+                    <TooltipContent class="ping-task-statistics !rounded p-3">
                       <div class="text-xs gap-x-4 gap-y-1.5 grid grid-cols-4">
                         <template v-if="task.min !== undefined">
                           <span class="text-muted-foreground">最小</span>
@@ -1059,3 +1059,33 @@ onBeforeUnmount(() => {
     </Spinner>
   </div>
 </template>
+
+<style scoped>
+/* The Portal does not inherit the parent's scope attribute. Target only this
+   statistics instance's class, pairing its opaque surface and foreground. */
+:global(.ping-task-statistics) {
+  max-width: calc(100vw - 24px);
+  border: 1px solid var(--border);
+  background: var(--popover);
+  color: var(--popover-foreground);
+}
+
+:global(.ping-task-statistics > .grid) {
+  grid-template-columns: repeat(2, auto max-content);
+}
+
+:global(.ping-task-statistics > .grid > span) {
+  white-space: nowrap;
+}
+
+:global(.ping-task-statistics svg) {
+  background: var(--popover);
+  fill: var(--popover);
+}
+
+@media (max-width: 359px) {
+  :global(.ping-task-statistics > .grid) {
+    grid-template-columns: auto max-content;
+  }
+}
+</style>

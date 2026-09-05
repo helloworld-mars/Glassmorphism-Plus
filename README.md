@@ -4,7 +4,7 @@
 
 面向 Komari Monitor 的增强玻璃拟态主题，重点强化每节点 Ping 任务绑定、长时间历史、性能、移动端体验和日常运维能力。
 
-![Version](https://img.shields.io/github/v/release/helloworld-mars/Glassmorphism-Plus?style=for-the-badge&label=release&color=10b981)
+![Version](https://img.shields.io/github/v/release/VoyagerProbe/Glassmorphism-Plus?style=for-the-badge&label=release&color=10b981)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883?style=for-the-badge&logo=vue.js)
 ![Vite](https://img.shields.io/badge/Vite-7-646cff?style=for-the-badge&logo=vite)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-v4-38bdf8?style=for-the-badge&logo=tailwindcss)
@@ -35,23 +35,23 @@
 
 | 项目               | 当前状态                                                                                                               |
 | :----------------- | :--------------------------------------------------------------------------------------------------------------------- |
-| 当前 Plus 版本     | **v2.7.2**                                                                                                             |
+| 当前 Plus 版本     | **v2.7.3**                                                                                                             |
 | 上游同步基线       | [sanrokamlan Glassmorphism v3.3.7](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases/tag/v3.3.7) |
-| 当前维护者         | [helloworld-mars](https://github.com/helloworld-mars)                                                                  |
+| 当前维护者         | [VoyagerProbe](https://github.com/VoyagerProbe)                                                                  |
 | 适用平台           | [Komari Monitor](https://github.com/komari-monitor/komari)                                                             |
 | 已验证 Komari 版本 | **1.4.3**                                                                                                              |
 | 技术栈             | Vue 3、TypeScript、Vite 7、Tailwind CSS 4、Pinia、ECharts、Bun                                                         |
-| 源码发布           | GitHub `main` 与 `v2.7.2` Release；Release 默认附加唯一、已验证的客户安装包                                            |
-| 本地安装包         | `2.7.2/Glassmorphism-Plus-release-2.7.2.zip`                                                                           |
+| 源码发布           | GitHub `main` 与 `v2.7.3` Release；Release 默认附加唯一、已验证的客户安装包                                            |
+| 本地安装包         | `2.7.3/Glassmorphism-Plus-release-2.7.3.zip`                                                                           |
 
 Glassmorphism Plus 是独立维护的 Glassmorphism 衍生主题，Plus 使用自己的版本体系；上游 v3.3.7 仅代表当前同步基线，并非 Plus 的版本号。同步来源、选择性合并和署名详见 [UPSTREAM.md](UPSTREAM.md)。
 
-### ✨ 最新版本 · v2.7.2
+### ✨ 最新版本 · v2.7.3
 
-- 首页所有节点与任务现在同步显示同一最新三分钟时间槽；尚无真实样本的当前槽以“等待采样”呈现，不再因透明样式看似少一格。
-- `WAITING_SAMPLE` 使用 v2.6.0 的中性灰占位；成功查询确认的 `NO_SAMPLE` 使用 v2.7.1 原延迟不可达红色斜纹；真实 `latency=null + loss=100%` 的 `UNREACHABLE` 延迟与丢包两轨统一为现有实心故障红。
-- 等待采样、无采样、探测不可达、更新失败与任务失效保持独立语义；bucket Tooltip 与 ARIA 同步，迟到真实样本仍可原位恢复为数据或不可达。
-- 本版不改动 Ping RPC、请求参数、Metric／Legacy、缓存、共享调度、三分钟 20 bucket 几何、任务绑定或长范围图表行为。
+- 将当前维护者与项目链接统一更新为 VoyagerProbe，页脚版本署名简化为“版本号 · VoyagerProbe”。
+- 修复 Ping 任务统计提示在深浅主题下的文字对比度，并保持全部统计内容与交互。
+- 修复首页列表进入节点详情时，已显示的 Ping 趋势条在离场阶段短暂清空的问题。
+- 保持现有数据读取、缓存、刷新与任务配置行为不变。
 
 ---
 
@@ -139,11 +139,11 @@ Glassmorphism Plus 是独立维护的 Glassmorphism 衍生主题，Plus 使用�
 
 ## 📦 安装与升级
 
-正式源码仓库：<https://github.com/helloworld-mars/Glassmorphism-Plus>
+正式源码仓库：<https://github.com/VoyagerProbe/Glassmorphism-Plus>
 
 ### 重要说明
 
-- **v2.7.2 GitHub Release 默认附加且只附加一个已验证的 installer asset：** `Glassmorphism-Plus-release-2.7.2.zip`。
+- **v2.7.3 GitHub Release 默认附加且只附加一个已验证的 installer asset：** `Glassmorphism-Plus-release-2.7.3.zip`。
 - GitHub 自动生成的 **Source code (zip)** 是源码快照，**不是** Komari 可安装主题包。
 - Komari 的远程仓库导入流程应使用正式 Release 中的 installer asset；仍不要用 GitHub 自动生成的源码压缩包代替。
 
@@ -177,7 +177,7 @@ dist/
 
 ### 方式二：使用 GitHub Release 安装包
 
-从对应版本的 [GitHub Release](https://github.com/helloworld-mars/Glassmorphism-Plus/releases) 下载 `Glassmorphism-Plus-release-<version>.zip`，核对版本与发布记录后可直接在 Komari 后台上传。不要用 GitHub 的 Source code zip 代替。
+从对应版本的 [GitHub Release](https://github.com/VoyagerProbe/Glassmorphism-Plus/releases) 下载 `Glassmorphism-Plus-release-<version>.zip`，核对版本与发布记录后可直接在 Komari 后台上传。不要用 GitHub 的 Source code zip 代替。
 
 ### 升级提示
 
@@ -224,12 +224,19 @@ bun run release:prepare
 
 ## 📝 版本历史
 
-当前版本更新见上方「最新版本 · v2.7.2」。
+当前版本更新见上方「最新版本 · v2.7.3」。
 
 <details>
 <summary><strong>📚 查看历史版本更新</strong></summary>
 
 <br>
+
+### v2.7.2
+
+- 首页所有节点与任务现在同步显示同一最新三分钟时间槽；尚无真实样本的当前槽以“等待采样”呈现，不再因透明样式看似少一格。
+- `WAITING_SAMPLE` 使用 v2.6.0 的中性灰占位；成功查询确认的 `NO_SAMPLE` 使用 v2.7.1 原延迟不可达红色斜纹；真实 `latency=null + loss=100%` 的 `UNREACHABLE` 延迟与丢包两轨统一为现有实心故障红。
+- 等待采样、无采样、探测不可达、更新失败与任务失效保持独立语义；bucket Tooltip 与 ARIA 同步，迟到真实样本仍可原位恢复为数据或不可达。
+- 本版不改动 Ping RPC、请求参数、Metric／Legacy、缓存、共享调度、三分钟 20 bucket 几何、任务绑定或长范围图表行为。
 
 ### v2.7.1
 
@@ -368,13 +375,13 @@ bun run release:prepare
 
 </details>
 
-完整版本记录请查看 [CHANGELOG.md](CHANGELOG.md) 与 [GitHub Releases](https://github.com/helloworld-mars/Glassmorphism-Plus/releases)。上游来源与选择性同步记录见 [UPSTREAM.md](UPSTREAM.md)。
+完整版本记录请查看 [CHANGELOG.md](CHANGELOG.md) 与 [GitHub Releases](https://github.com/VoyagerProbe/Glassmorphism-Plus/releases)。上游来源与选择性同步记录见 [UPSTREAM.md](UPSTREAM.md)。
 
 ---
 
 ## 🙏 Credits & License
 
-- Glassmorphism Plus 维护者：[helloworld-mars](https://github.com/helloworld-mars)
+- Glassmorphism Plus 维护者：[VoyagerProbe](https://github.com/VoyagerProbe)
 - 原始 Glassmorphism 主题与维护者：[sanrokamlan](https://github.com/sanrokamlan-prog)
 - 原始仓库：[sanrokamlan-prog/komari-theme-Glassmorphism](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism)
 - License：[MIT](LICENSE)

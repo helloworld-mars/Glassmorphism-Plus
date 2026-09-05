@@ -2,9 +2,9 @@
   "name": "Komari Glassmorphism Plus",
   "short": "glassmorphism-plus",
   "description": "A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.",
-  "version": "2.7.2",
-  "author": "helloworld-mars",
-  "url": "https://github.com/helloworld-mars/Glassmorphism-Plus",
+  "version": "2.7.3",
+  "author": "VoyagerProbe",
+  "url": "https://github.com/VoyagerProbe/Glassmorphism-Plus",
   "preview": "preview.png",
   "configuration": {
     "type": "managed",

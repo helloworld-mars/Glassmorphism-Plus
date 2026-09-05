@@ -2,6 +2,22 @@
 
 本文件只记录 **Glassmorphism Plus** 自己的发行版本。原始 Glassmorphism 的版本历史请查看[上游仓库](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases)；Plus 的选择性同步记录见 [UPSTREAM.md](UPSTREAM.md)。
 
+## [2.7.3] - 2026-09-06
+
+### Changed
+
+- 当前维护者、正式仓库和有效发布链接统一为 VoyagerProbe；页脚仅保留由 manifest 构建版本提供的 `v<version> · VoyagerProbe`，仓库上游归属与 LICENSE 保持。
+- 永久验证与报告流程按变更风险执行必要门禁，复用一致依赖和构建产物，不重复执行无关矩阵。
+
+### Fixed
+
+- PingChart 任务统计 Tooltip 使用配套、不透明的 popover 背景与前景色；深浅主题及打开时切换主题均保持可读，数值与单位不换行，窄屏使用局部布局。
+- 列表 Ping 单元格复用既有停用快照保留机制，避免旧列表离场时回退为空灰格；节点、任务与可见权限身份变化会使保留失效，原有订阅仍立即停止。
+
+### Compatibility and performance
+
+- 未修改 Ping RPC、请求参数、Metric／Legacy、共享缓存、调度器、任务配置、bucket 或图表统计公式；未新增依赖、请求或 timer，继续兼容 Komari `1.4.3`。
+
 ## [2.7.2] - 2026-09-04
 
 ### Fixed
@@ -231,18 +247,19 @@
 
 Git tags `1.0`、`1.1` 与 `1.2` 指向同一历史 commit。现有证据不足以为这三个 tag 分别重建独立、可靠的变更列表，因此这里只保留历史事实，不推测具体修复内容。
 
-[2.5.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.3.1...v2.5.0
-[2.3.1]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.3.0...v2.3.1
-[2.3.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.2.0...v2.3.0
-[2.2.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.1.0...v2.2.0
-[2.1.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v2.0.0...v2.1.0
-[2.0.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v1.4.0...v2.0.0
-[1.4.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/compare/v1.3.6...v1.4.0
-[1.3.6]: https://github.com/helloworld-mars/Glassmorphism-Plus/releases/tag/v1.3.6
-[1.3.5]: https://github.com/helloworld-mars/Glassmorphism-Plus/releases/tag/v1.3.5
-[1.3.4]: https://github.com/helloworld-mars/Glassmorphism-Plus/releases/tag/v1.3.4
-[1.3.3]: https://github.com/helloworld-mars/Glassmorphism-Plus/releases/tag/v1.3.3
-[1.3.2]: https://github.com/helloworld-mars/Glassmorphism-Plus/releases/tag/v1.3.2
-[1.3.1]: https://github.com/helloworld-mars/Glassmorphism-Plus/releases/tag/v1.3.1
-[1.3.0]: https://github.com/helloworld-mars/Glassmorphism-Plus/releases/tag/1.3.0
-[1.2.1]: https://github.com/helloworld-mars/Glassmorphism-Plus/releases/tag/1.2.1
+[2.7.3]: https://github.com/VoyagerProbe/Glassmorphism-Plus/compare/v2.7.2...v2.7.3
+[2.5.0]: https://github.com/VoyagerProbe/Glassmorphism-Plus/compare/v2.3.1...v2.5.0
+[2.3.1]: https://github.com/VoyagerProbe/Glassmorphism-Plus/compare/v2.3.0...v2.3.1
+[2.3.0]: https://github.com/VoyagerProbe/Glassmorphism-Plus/compare/v2.2.0...v2.3.0
+[2.2.0]: https://github.com/VoyagerProbe/Glassmorphism-Plus/compare/v2.1.0...v2.2.0
+[2.1.0]: https://github.com/VoyagerProbe/Glassmorphism-Plus/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/VoyagerProbe/Glassmorphism-Plus/compare/v1.4.0...v2.0.0
+[1.4.0]: https://github.com/VoyagerProbe/Glassmorphism-Plus/compare/v1.3.6...v1.4.0
+[1.3.6]: https://github.com/VoyagerProbe/Glassmorphism-Plus/releases/tag/v1.3.6
+[1.3.5]: https://github.com/VoyagerProbe/Glassmorphism-Plus/releases/tag/v1.3.5
+[1.3.4]: https://github.com/VoyagerProbe/Glassmorphism-Plus/releases/tag/v1.3.4
+[1.3.3]: https://github.com/VoyagerProbe/Glassmorphism-Plus/releases/tag/v1.3.3
+[1.3.2]: https://github.com/VoyagerProbe/Glassmorphism-Plus/releases/tag/v1.3.2
+[1.3.1]: https://github.com/VoyagerProbe/Glassmorphism-Plus/releases/tag/v1.3.1
+[1.3.0]: https://github.com/VoyagerProbe/Glassmorphism-Plus/releases/tag/1.3.0
+[1.2.1]: https://github.com/VoyagerProbe/Glassmorphism-Plus/releases/tag/1.2.1

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useNodeCardPingTaskCatalog } from '@/composables/useNodeCardPingTaskCatalog'
 import { useNodeMultiPingStats } from '@/composables/useNodeMultiPingStats'
 import { useNodePingDisplay } from '@/composables/useNodePingDisplay'
@@ -36,15 +36,41 @@ const firstTask = computed(() => resolution.value.tasks.slice(0, 1).map(task => 
   taskName: task.name,
   intervalSeconds: task.interval,
 })))
+const legacySelectedTaskId = computed(() => getNodeCardPingTaskId(appStore.nodeCardPingTaskBindings, props.uuid))
+const displayIdentity = computed(() => JSON.stringify([
+  props.uuid.trim().toLowerCase(),
+  usesLegacy.value,
+  usesLegacy.value ? legacySelectedTaskId.value : firstTask.value,
+  catalog.loaded.value,
+  appStore.isLoggedIn,
+  appStore.publicSettings?.record_enabled,
+  appStore.publicSettings?.ping_record_preserve_time,
+]))
+const activeDisplayIdentity = ref<string | null>(null)
+watch([() => props.enabled, displayIdentity], ([enabled, identity]) => {
+  if (enabled)
+    activeDisplayIdentity.value = identity
+  else if (activeDisplayIdentity.value !== identity)
+    activeDisplayIdentity.value = null
+}, { immediate: true, flush: 'sync' })
+// Keep only this identity's last display during leave. The composables still
+// release subscriptions immediately; active empty/error updates are not frozen.
+const retainLeavingDisplay = computed(() => !props.enabled
+  && activeDisplayIdentity.value === displayIdentity.value
+  && appStore.publicSettings?.record_enabled !== false
+  && appStore.publicSettings?.ping_record_preserve_time !== 0)
 const { snapshots } = useNodeMultiPingStats(
   () => props.uuid,
   firstTask,
-  { enabled: () => props.enabled && !usesLegacy.value && catalog.loaded.value },
+  {
+    enabled: () => props.enabled && !usesLegacy.value && catalog.loaded.value,
+    retainSnapshotWhenDisabled: () => retainLeavingDisplay.value && !usesLegacy.value,
+  },
 )
 
-const legacySelectedTaskId = computed(() => getNodeCardPingTaskId(appStore.nodeCardPingTaskBindings, props.uuid))
 const legacyDisplay = useNodePingDisplay(() => props.uuid, {
   enabled: () => props.enabled && usesLegacy.value,
+  retainSnapshotWhenDisabled: () => retainLeavingDisplay.value && usesLegacy.value,
   selectedTaskId: legacySelectedTaskId,
 })
 
@@ -105,6 +131,7 @@ const lossDisplay = computed(() => {
     type="button"
     class="group flex w-full flex-col gap-[1px] pr-4 text-left"
     aria-label="打开延迟和丢包监测"
+    :data-ping-list-enabled="props.enabled"
     @click.stop="emit('click')"
   >
     <span class="sr-only" :aria-label="`延迟 ${latencyDisplay}`">延迟 {{ latencyDisplay }}</span>

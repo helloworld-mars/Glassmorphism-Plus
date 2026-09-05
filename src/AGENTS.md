@@ -122,6 +122,6 @@ bun run build
 bun run test:visual
 ```
 
-`tests/visual/` is the deterministic Playwright regression suite. Run the relevant tests for every behavior change and use the full suite for a formal release. Do not invent an unrelated `bun test`/Vitest command.
+`tests/visual/` is the deterministic Playwright regression suite. Follow `CODEX.md` for scoped lint, one build including type-check, artifact reuse and risk-matched regression coverage, including formal releases. Expand beyond relevant tests only when the affected behavior warrants it. Do not invent an unrelated `bun test`/Vitest command.
 
 Update [../AICACHE.md](../AICACHE.md) with validation results or explain why validation was skipped.

@@ -2,8 +2,8 @@
 
 ## Glassmorphism Plus
 
-- **Maintainer and Plus modifications:** [helloworld-mars](https://github.com/helloworld-mars)
-- **Repository:** [helloworld-mars/Glassmorphism-Plus](https://github.com/helloworld-mars/Glassmorphism-Plus)
+- **Maintainer and Plus modifications:** [VoyagerProbe](https://github.com/VoyagerProbe)
+- **Repository:** [VoyagerProbe/Glassmorphism-Plus](https://github.com/VoyagerProbe/Glassmorphism-Plus)
 
 Glassmorphism Plus is an independently maintained derivative. Its Plus-specific code, documentation, release process and continued maintenance are credited separately from the original theme.
 
@@ -28,4 +28,4 @@ The inherited [MIT License](LICENSE) is preserved unchanged. Its actual copyrigh
 
 > Copyright (c) 2025 Tony Liu (tonyliuzj, tony-liu.com)
 
-Tony Liu is the copyright holder named in the LICENSE text. This notice is not silently reassigned to sanrokamlan or helloworld-mars, and the roles of original project maintainer, Plus maintainer and LICENSE copyright holder are intentionally kept distinct.
+Tony Liu is the copyright holder named in the LICENSE text. This notice is not silently reassigned to sanrokamlan or VoyagerProbe, and the roles of original project maintainer, Plus maintainer and LICENSE copyright holder are intentionally kept distinct.

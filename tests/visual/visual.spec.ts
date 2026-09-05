@@ -41,17 +41,17 @@ test('Plus documentation keeps its own version identity and preserves upstream a
 
   expect(readme).toContain('# 🌌 Komari Glassmorphism Plus')
   expect(readme).toContain('当前 Plus 版本')
-  expect(readme).toContain('**v2.7.2**')
+  expect(readme).toContain('**v2.7.3**')
   expect(readme).toContain('sanrokamlan Glassmorphism v3.3.7')
-  expect(readme).toContain('Glassmorphism-Plus-release-2.7.2.zip')
+  expect(readme).toContain('Glassmorphism-Plus-release-2.7.3.zip')
   expect(readme).toContain('Source code (zip)')
   expect(readme).not.toMatch(/^#{2,}\s+(?:\S.*)?v3\.\d/m)
 
   const changelogVersions = Array.from(changelog.matchAll(/^## \[([^\]]+)\]/gm), match => match[1])
-  expect(changelogVersions).toEqual(['2.7.2', '2.7.1', '2.7.0', '2.6.0', '2.5.0', '2.3.1', '2.3.0', '2.2.0', '2.1.0', '2.0.0', '1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
+  expect(changelogVersions).toEqual(['2.7.3', '2.7.2', '2.7.1', '2.7.0', '2.6.0', '2.5.0', '2.3.1', '2.3.0', '2.2.0', '2.1.0', '2.0.0', '1.4.0', '1.3.6', '1.3.5', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.3.0', '1.2.1'])
   expect(upstream).toContain('Current upstream baseline')
   expect(upstream).toContain('v3.3.7')
-  expect(credits).toContain('helloworld-mars')
+  expect(credits).toContain('VoyagerProbe')
   expect(credits).toContain('sanrokamlan')
   expect(credits).toContain('Komari-Theme-LuminaPlus')
   expect(credits).toContain('clean-room reimplementation')
@@ -1318,7 +1318,7 @@ test('mobile viewport keeps Ping dialogs and route transitions above the page ca
   }))).toEqual({ overflow: '', pointerEvents: '', paddingRight: '', marginRight: '' })
 })
 
-test('brand metadata and homepage footer retain current and original attribution', async ({ page }) => {
+test('brand metadata and shared footer keep current identity and a compact version line', async ({ page }) => {
   const themeManifest = JSON.parse(readFileSync(new URL('../../komari-theme.json', import.meta.url), 'utf8')) as Record<string, unknown>
   const packageMetadata = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as Record<string, unknown>
   const originalGlassmorphismManifest = { name: 'Komari Glassmorphism', short: 'Glassmorphism' }
@@ -1327,14 +1327,15 @@ test('brand metadata and homepage footer retain current and original attribution
     name: 'Komari Glassmorphism Plus',
     short: 'glassmorphism-plus',
     description: 'A customized Glassmorphism theme for Komari, based on the original theme by sanrokamlan.',
-    version: '2.7.2',
-    author: 'helloworld-mars',
-    url: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
+    version: '2.7.3',
+    author: 'VoyagerProbe',
+    url: 'https://github.com/VoyagerProbe/Glassmorphism-Plus',
   })
   expect(packageMetadata).toMatchObject({
     name: 'komari-theme-glassmorphism-plus',
-    version: '2.7.2',
-    homepage: 'https://github.com/helloworld-mars/Glassmorphism-Plus',
+    version: '2.7.3',
+    author: { name: 'VoyagerProbe', url: 'https://github.com/VoyagerProbe' },
+    homepage: 'https://github.com/VoyagerProbe/Glassmorphism-Plus',
   })
   expect(themeManifest.short).toMatch(/^[\w-]+$/)
   expect(themeManifest.short).not.toBe(originalGlassmorphismManifest.short)
@@ -1376,10 +1377,12 @@ test('brand metadata and homepage footer retain current and original attribution
   await openStablePage(page)
 
   const footer = page.locator('footer')
-  await expect(footer.getByRole('link', { name: 'Glassmorphism Plus' })).toHaveAttribute('href', 'https://github.com/helloworld-mars/Glassmorphism-Plus')
-  await expect(footer.getByText('v2.7.2 · helloworld-mars', { exact: true }).first()).toBeVisible()
-  await expect(footer.getByRole('link', { name: 'Based on the original theme by sanrokamlan' }))
-    .toHaveAttribute('href', 'https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism')
+  await expect(footer.getByRole('link', { name: 'Glassmorphism Plus' })).toHaveAttribute('href', 'https://github.com/VoyagerProbe/Glassmorphism-Plus')
+  await expect(footer.getByText('v2.7.3 · VoyagerProbe', { exact: true }).first()).toBeVisible()
+  await expect(footer).not.toContainText('Based on the original theme')
+  await page.goto(`/instance/${PRIMARY_NODE_UUID}`)
+  await expect(footer.getByText('v2.7.3 · VoyagerProbe', { exact: true }).first()).toBeVisible()
+  await expect(footer).not.toContainText('Based on the original theme')
   await expect(footer).not.toContainText('unknown')
 })
 
