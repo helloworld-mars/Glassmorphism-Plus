@@ -37,7 +37,7 @@
 | :----------------- | :--------------------------------------------------------------------------------------------------------------------- |
 | 当前 Plus 版本     | **v2.7.3**                                                                                                             |
 | 上游同步基线       | [sanrokamlan Glassmorphism v3.3.7](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases/tag/v3.3.7) |
-| 当前维护者         | [VoyagerProbe](https://github.com/VoyagerProbe)                                                                  |
+| 当前维护者         | [VoyagerProbe](https://github.com/VoyagerProbe)                                                                        |
 | 适用平台           | [Komari Monitor](https://github.com/komari-monitor/komari)                                                             |
 | 已验证 Komari 版本 | **1.4.3**                                                                                                              |
 | 技术栈             | Vue 3、TypeScript、Vite 7、Tailwind CSS 4、Pinia、ECharts、Bun                                                         |
